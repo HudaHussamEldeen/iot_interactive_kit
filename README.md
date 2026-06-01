@@ -64,3 +64,4 @@ source zephyr/zephyr-env.sh
 west build -p always -b esp32s3_devkitc/esp32s3/procpu iot_interactive_kit
 west flash -d iot_interactive_kit/build
 ```
+# iot_interactive_kit
