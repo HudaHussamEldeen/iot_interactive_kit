@@ -1,0 +1,5 @@
+west:
+  command: /home/huda-hussam/zephyrproject/.venv/bin/west build -p always -b esp32s3_devkitc/esp32s3/procpu
+    iot_interactive_kit
+  topdir: /home/huda-hussam/zephyrproject
+  version: 1.5.0
