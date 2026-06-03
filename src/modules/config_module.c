@@ -14,10 +14,32 @@ static struct kit_config current_config = {
 	.wifi_ssid = "",
 	.wifi_psk = "",
 	.api_token = "iot-kit-dev",
+	.wifi_ip_mode = "dhcp",
+	.wifi_ip_address = "",
+	.wifi_netmask = "",
+	.wifi_gateway = "",
 	.wifi_provisioned = false,
 };
 
 static K_MUTEX_DEFINE(config_lock);
+
+static wifi_ip_mode_t ip_mode_from_string(const char *mode)
+{
+	if (mode == NULL) {
+		return WIFI_IP_MODE_DHCP;
+	}
+
+	if (strcmp(mode, "static") == 0) {
+		return WIFI_IP_MODE_STATIC;
+	}
+
+	return WIFI_IP_MODE_DHCP;
+}
+
+static const char *ip_mode_to_string(wifi_ip_mode_t mode)
+{
+	return mode == WIFI_IP_MODE_STATIC ? "static" : "dhcp";
+}
 
 static int settings_set_cb(const char *key, size_t len_rd, settings_read_cb read_cb,
 			   void *cb_arg)
@@ -38,6 +60,18 @@ static int settings_set_cb(const char *key, size_t len_rd, settings_read_cb read
 	} else if (settings_name_steq(key, "api_token", NULL)) {
 		target = current_config.api_token;
 		target_size = sizeof(current_config.api_token);
+	} else if (settings_name_steq(key, "wifi_ip_mode", NULL)) {
+		target = current_config.wifi_ip_mode;
+		target_size = sizeof(current_config.wifi_ip_mode);
+	} else if (settings_name_steq(key, "wifi_ip_address", NULL)) {
+		target = current_config.wifi_ip_address;
+		target_size = sizeof(current_config.wifi_ip_address);
+	} else if (settings_name_steq(key, "wifi_netmask", NULL)) {
+		target = current_config.wifi_netmask;
+		target_size = sizeof(current_config.wifi_netmask);
+	} else if (settings_name_steq(key, "wifi_gateway", NULL)) {
+		target = current_config.wifi_gateway;
+		target_size = sizeof(current_config.wifi_gateway);
 	}
 
 	if (target != NULL) {
@@ -156,6 +190,18 @@ int config_module_save(const struct kit_config *config)
 	if (ret == 0) {
 		ret = save_string("api_token", current_config.api_token);
 	}
+	if (ret == 0) {
+		ret = save_string("wifi_ip_mode", current_config.wifi_ip_mode);
+	}
+	if (ret == 0) {
+		ret = save_string("wifi_ip_address", current_config.wifi_ip_address);
+	}
+	if (ret == 0) {
+		ret = save_string("wifi_netmask", current_config.wifi_netmask);
+	}
+	if (ret == 0) {
+		ret = save_string("wifi_gateway", current_config.wifi_gateway);
+	}
 	k_mutex_unlock(&config_lock);
 
 	if (ret < 0) {
@@ -163,6 +209,30 @@ int config_module_save(const struct kit_config *config)
 	}
 
 	return ret;
+}
+
+int config_module_save_wifi_config(const wifi_sta_cfg_t *cfg)
+{
+	struct kit_config config;
+
+	if (cfg == NULL) {
+		return -EINVAL;
+	}
+
+	config_module_get(&config);
+	snprintk(config.wifi_ssid, sizeof(config.wifi_ssid), "%s", cfg->ssid);
+	snprintk(config.wifi_psk, sizeof(config.wifi_psk), "%s", cfg->psk);
+	snprintk(config.wifi_ip_mode, sizeof(config.wifi_ip_mode), "%s",
+		 ip_mode_to_string(cfg->ip_mode));
+	snprintk(config.wifi_ip_address, sizeof(config.wifi_ip_address), "%s",
+		 cfg->ip_address);
+	snprintk(config.wifi_netmask, sizeof(config.wifi_netmask), "%s",
+		 cfg->netmask);
+	snprintk(config.wifi_gateway, sizeof(config.wifi_gateway), "%s",
+		 cfg->gateway);
+	config.wifi_provisioned = false;
+
+	return config_module_save(&config);
 }
 
 bool config_module_has_wifi_credentials(void)
@@ -211,6 +281,10 @@ int config_module_save_wifi_credentials(const char *ssid, const char *psk)
 	config_module_get(&config);
 	snprintk(config.wifi_ssid, sizeof(config.wifi_ssid), "%s", ssid);
 	snprintk(config.wifi_psk, sizeof(config.wifi_psk), "%s", psk);
+	snprintk(config.wifi_ip_mode, sizeof(config.wifi_ip_mode), "%s", "dhcp");
+	config.wifi_ip_address[0] = '\0';
+	config.wifi_netmask[0] = '\0';
+	config.wifi_gateway[0] = '\0';
 	config.wifi_provisioned = false;
 
 	ret = config_module_save(&config);

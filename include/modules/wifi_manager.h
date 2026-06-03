@@ -24,9 +24,18 @@ typedef struct {
 	bool open;
 } wifi_ap_cfg_t;
 
+typedef enum {
+	WIFI_IP_MODE_DHCP = 0,
+	WIFI_IP_MODE_STATIC,
+} wifi_ip_mode_t;
+
 typedef struct {
 	char ssid[WIFI_MANAGER_SSID_MAX_LEN + 1];
 	char psk[WIFI_MANAGER_PSK_MAX_LEN + 1];
+	wifi_ip_mode_t ip_mode;
+	char ip_address[16];
+	char netmask[16];
+	char gateway[16];
 } wifi_sta_cfg_t;
 
 typedef void (*wifi_manager_cb_t)(wifi_manager_event_t event, void *user_data);
@@ -54,5 +63,6 @@ int wifi_manager_get_sta_ipv4(char *buf, size_t buf_len);
 bool wifi_manager_is_ap_active(void);
 bool wifi_manager_is_sta_link_up(void);
 void wifi_manager_get_status(struct wifi_manager_status *status);
+void wifi_manager_debug_dump(void);
 
 #endif /* MODULES_WIFI_MANAGER_H_ */

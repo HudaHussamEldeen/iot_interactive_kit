@@ -94,8 +94,8 @@ events:
     checks:
       - "Performing Test C_COMPILER_SUPPORTS_WFORMAT_SIGNEDNESS"
     directories:
-      source: "/home/huda-hussam/zephyrproject/iot_interactive_kit/build/CMakeFiles/CMakeScratch/TryCompile-zKj5h0"
-      binary: "/home/huda-hussam/zephyrproject/iot_interactive_kit/build/CMakeFiles/CMakeScratch/TryCompile-zKj5h0"
+      source: "/home/huda-hussam/zephyrproject/iot_interactive_kit/build/CMakeFiles/CMakeScratch/TryCompile-p38T2f"
+      binary: "/home/huda-hussam/zephyrproject/iot_interactive_kit/build/CMakeFiles/CMakeScratch/TryCompile-p38T2f"
     cmakeVariables:
       CMAKE_C_FLAGS: ""
       CMAKE_C_FLAGS_DEBUG: "-g"
@@ -105,11 +105,11 @@ events:
       variable: "C_COMPILER_SUPPORTS_WFORMAT_SIGNEDNESS"
       cached: true
       stdout: |
-        Change Dir: '/home/huda-hussam/zephyrproject/iot_interactive_kit/build/CMakeFiles/CMakeScratch/TryCompile-zKj5h0'
+        Change Dir: '/home/huda-hussam/zephyrproject/iot_interactive_kit/build/CMakeFiles/CMakeScratch/TryCompile-p38T2f'
         
-        Run Build Command(s): /usr/bin/ninja -v cmTC_5aad7
-        [1/2] /home/huda-hussam/zephyr-sdk-1.0.1/gnu/xtensa-espressif_esp32s3_zephyr-elf/bin/xtensa-espressif_esp32s3_zephyr-elf-gcc -DC_COMPILER_SUPPORTS_WFORMAT_SIGNEDNESS  -nostartfiles -nostdlib -isystem "/home/huda-hussam/zephyr-sdk-1.0.1/gnu/xtensa-espressif_esp32s3_zephyr-elf/bin/../lib/gcc/xtensa-espressif_esp32s3_zephyr-elf/14.3.0/include" -isystem "/home/huda-hussam/zephyr-sdk-1.0.1/gnu/xtensa-espressif_esp32s3_zephyr-elf/bin/../lib/gcc/xtensa-espressif_esp32s3_zephyr-elf/14.3.0/include" -Wl,--unresolved-symbols=ignore-in-object-files -Wl,--entry=0 -fuse-ld=bfd -std=c99   -Wformat-signedness -o CMakeFiles/cmTC_5aad7.dir/src.c.obj -c /home/huda-hussam/zephyrproject/iot_interactive_kit/build/CMakeFiles/CMakeScratch/TryCompile-zKj5h0/src.c
-        [2/2] : && /home/huda-hussam/zephyr-sdk-1.0.1/gnu/xtensa-espressif_esp32s3_zephyr-elf/bin/xtensa-espressif_esp32s3_zephyr-elf-gcc -nostartfiles -nostdlib -isystem "/home/huda-hussam/zephyr-sdk-1.0.1/gnu/xtensa-espressif_esp32s3_zephyr-elf/bin/../lib/gcc/xtensa-espressif_esp32s3_zephyr-elf/14.3.0/include" -isystem "/home/huda-hussam/zephyr-sdk-1.0.1/gnu/xtensa-espressif_esp32s3_zephyr-elf/bin/../lib/gcc/xtensa-espressif_esp32s3_zephyr-elf/14.3.0/include" -Wl,--unresolved-symbols=ignore-in-object-files -Wl,--entry=0 -fuse-ld=bfd  CMakeFiles/cmTC_5aad7.dir/src.c.obj -o cmTC_5aad7   && :
+        Run Build Command(s): /usr/bin/ninja -v cmTC_3163a
+        [1/2] /home/huda-hussam/zephyr-sdk-1.0.1/gnu/xtensa-espressif_esp32s3_zephyr-elf/bin/xtensa-espressif_esp32s3_zephyr-elf-gcc -DC_COMPILER_SUPPORTS_WFORMAT_SIGNEDNESS  -nostartfiles -nostdlib -isystem "/home/huda-hussam/zephyr-sdk-1.0.1/gnu/xtensa-espressif_esp32s3_zephyr-elf/bin/../lib/gcc/xtensa-espressif_esp32s3_zephyr-elf/14.3.0/include" -isystem "/home/huda-hussam/zephyr-sdk-1.0.1/gnu/xtensa-espressif_esp32s3_zephyr-elf/bin/../lib/gcc/xtensa-espressif_esp32s3_zephyr-elf/14.3.0/include" -Wl,--unresolved-symbols=ignore-in-object-files -Wl,--entry=0 -fuse-ld=bfd -std=c99   -Wformat-signedness -o CMakeFiles/cmTC_3163a.dir/src.c.obj -c /home/huda-hussam/zephyrproject/iot_interactive_kit/build/CMakeFiles/CMakeScratch/TryCompile-p38T2f/src.c
+        [2/2] : && /home/huda-hussam/zephyr-sdk-1.0.1/gnu/xtensa-espressif_esp32s3_zephyr-elf/bin/xtensa-espressif_esp32s3_zephyr-elf-gcc -nostartfiles -nostdlib -isystem "/home/huda-hussam/zephyr-sdk-1.0.1/gnu/xtensa-espressif_esp32s3_zephyr-elf/bin/../lib/gcc/xtensa-espressif_esp32s3_zephyr-elf/14.3.0/include" -isystem "/home/huda-hussam/zephyr-sdk-1.0.1/gnu/xtensa-espressif_esp32s3_zephyr-elf/bin/../lib/gcc/xtensa-espressif_esp32s3_zephyr-elf/14.3.0/include" -Wl,--unresolved-symbols=ignore-in-object-files -Wl,--entry=0 -fuse-ld=bfd  CMakeFiles/cmTC_3163a.dir/src.c.obj -o cmTC_3163a   && :
         
       exitCode: 0
 ...

@@ -19,7 +19,8 @@ LOG_MODULE_REGISTER(wifi_manager, LOG_LEVEL_INF);
 #define WIFI_MANAGER_EVENT_MASK                                              \
 	(NET_EVENT_WIFI_CONNECT_RESULT | NET_EVENT_WIFI_DISCONNECT_RESULT |  \
 	 NET_EVENT_WIFI_AP_ENABLE_RESULT | NET_EVENT_WIFI_AP_DISABLE_RESULT | \
-	 NET_EVENT_WIFI_AP_STA_CONNECTED | NET_EVENT_WIFI_AP_STA_DISCONNECTED)
+	 NET_EVENT_WIFI_AP_STA_CONNECTED | NET_EVENT_WIFI_AP_STA_DISCONNECTED | \
+	 NET_EVENT_WIFI_SCAN_RESULT | NET_EVENT_WIFI_RAW_SCAN_RESULT)
 
 static struct net_if *ap_iface;
 static struct net_if *sta_iface;
@@ -38,6 +39,7 @@ static bool ap_client_connected;
 static bool sta_ready_notified;
 static bool sta_link_connected;
 static bool sta_connect_requested;
+static bool sta_ipv4_seen_before_link;
 static struct wifi_manager_status link_status;
 
 static int wifi_manager_setup_ap_ipv4(void);
@@ -114,6 +116,13 @@ static void wifi_manager_notify_sta_ready(const char *reason)
 	}
 }
 
+static bool wifi_manager_sta_has_ipv4(void)
+{
+	char ip[NET_IPV4_ADDR_LEN];
+
+	return wifi_manager_get_sta_ipv4(ip, sizeof(ip)) == 0 && ip[0] != '\0';
+}
+
 static void wifi_manager_clear_sta_ipv4_state(void)
 {
 	struct net_in_addr *existing_addr;
@@ -122,12 +131,56 @@ static void wifi_manager_clear_sta_ipv4_state(void)
 		return;
 	}
 
+	LOG_INF("Clearing old IPv4 state (DHCP stop + address removal)");
 	(void)net_dhcpv4_stop(sta_iface);
 
 	existing_addr = net_if_ipv4_get_global_addr(sta_iface, NET_ADDR_PREFERRED);
 	if (existing_addr != NULL) {
+		LOG_INF("Removing existing IPv4 address");
 		(void)net_if_ipv4_addr_rm(sta_iface, existing_addr);
 	}
+}
+
+static int wifi_manager_configure_sta_static(const wifi_sta_cfg_t *cfg)
+{
+	struct net_in_addr ipaddr;
+	struct net_in_addr netmask;
+	struct net_in_addr gateway;
+	struct net_if_addr *addr;
+
+	if (cfg == NULL || sta_iface == NULL) {
+		return -EINVAL;
+	}
+
+	LOG_INF("[WiFi] STATIC MODE");
+	LOG_INF("[WiFi] ip=%s", cfg->ip_address);
+	LOG_INF("[WiFi] mask=%s", cfg->netmask);
+	LOG_INF("[WiFi] gw=%s", cfg->gateway);
+
+	if (net_addr_pton(AF_INET, cfg->ip_address, &ipaddr) != 0 ||
+	    net_addr_pton(AF_INET, cfg->netmask, &netmask) != 0) {
+		return -EINVAL;
+	}
+
+	(void)net_dhcpv4_stop(sta_iface);
+
+	addr = net_if_ipv4_addr_add(sta_iface, &ipaddr, NET_ADDR_MANUAL, 0);
+	if (addr == NULL) {
+		return -EIO;
+	}
+
+	if (!net_if_ipv4_set_netmask_by_addr(sta_iface, &ipaddr, &netmask)) {
+		return -EIO;
+	}
+
+	if (cfg->gateway[0] != '\0') {
+		if (net_addr_pton(AF_INET, cfg->gateway, &gateway) != 0) {
+			return -EINVAL;
+		}
+		net_if_ipv4_set_gw(sta_iface, &gateway);
+	}
+
+	return 0;
 }
 
 static void wifi_event_handler(struct net_mgmt_event_callback *cb, uint64_t mgmt_event,
@@ -144,6 +197,8 @@ static void wifi_event_handler(struct net_mgmt_event_callback *cb, uint64_t mgmt
 			LOG_DBG("Ignoring STA connect result (not requested)");
 			break;
 		}
+
+		LOG_INF("[WiFi] CONNECT RESULT status=%d", st);
 
 		if (st != 0) {
 			LOG_WRN("[WiFi] STA connect failed status=%d ssid=%s", st,
@@ -163,7 +218,30 @@ static void wifi_event_handler(struct net_mgmt_event_callback *cb, uint64_t mgmt
 			link_status.sta_ssid);
 		sta_link_connected = true;
 		wifi_manager_set_last_event("link_up");
+		if (current_sta_cfg.ip_mode == WIFI_IP_MODE_STATIC) {
+			int ret = wifi_manager_configure_sta_static(&current_sta_cfg);
+
+			if (ret < 0) {
+				LOG_ERR("[WiFi] Static STA configuration failed after link up: %d",
+					ret);
+				wifi_manager_set_last_event("static_config_failed");
+				wifi_manager_set_link_state(WIFI_LINK_STATE_CONNECTED_NO_IP);
+				if (app_cb != NULL) {
+					app_cb(WIFI_MANAGER_EVENT_STA_DISCONNECTED,
+					       app_cb_user_data);
+				}
+				break;
+			}
+			wifi_manager_notify_sta_ready("static");
+			break;
+		}
+
 		wifi_manager_set_link_state(WIFI_LINK_STATE_CONNECTED_NO_IP);
+		if (sta_ipv4_seen_before_link || wifi_manager_sta_has_ipv4()) {
+			LOG_INF("[WiFi] STA DHCP lease was ready before link event");
+			wifi_manager_notify_sta_ready("DHCP bound");
+			break;
+		}
 		net_dhcpv4_start(sta_iface);
 		LOG_INF("[WiFi] STA DHCP client started iface=%p", sta_iface);
 		break;
@@ -183,6 +261,7 @@ static void wifi_event_handler(struct net_mgmt_event_callback *cb, uint64_t mgmt
 		sta_ready_notified = false;
 		sta_link_connected = false;
 		sta_connect_requested = false;
+		sta_ipv4_seen_before_link = false;
 		link_status.sta_ipv4[0] = '\0';
 		wifi_manager_clear_sta_ipv4_state();
 		wifi_manager_set_last_event("disconnected");
@@ -220,7 +299,7 @@ static void wifi_event_handler(struct net_mgmt_event_callback *cb, uint64_t mgmt
 		const struct wifi_status *status = cb->info;
 		int st = status != NULL ? status->status : 0;
 
-		if (!ap_stop_requested && !ap_active) {
+		if (!ap_stop_requested) {
 			LOG_WRN("[WiFi] Ignoring unexpected SoftAP stop event status=%d iface=%p",
 				st, iface);
 			break;
@@ -280,6 +359,12 @@ static void wifi_event_handler(struct net_mgmt_event_callback *cb, uint64_t mgmt
 		}
 		break;
 	}
+	case NET_EVENT_WIFI_SCAN_RESULT:
+		LOG_INF("[WiFi] WiFi scan result event");
+		break;
+	case NET_EVENT_WIFI_RAW_SCAN_RESULT:
+		LOG_INF("[WiFi] WiFi raw scan result event");
+		break;
 	default:
 		break;
 	}
@@ -290,16 +375,40 @@ static void ipv4_event_handler(struct net_mgmt_event_callback *cb, uint64_t mgmt
 {
 	ARG_UNUSED(cb);
 
-	if (sta_iface == NULL || iface != sta_iface || !sta_link_connected) {
+	if (sta_iface == NULL || iface != sta_iface) {
+		LOG_DBG("[WiFi] Ignoring IPv4 event=0x%llx iface=%p sta=%p",
+			mgmt_event, iface, sta_iface);
 		return;
 	}
 
 	switch (mgmt_event) {
+	case NET_EVENT_IPV4_DHCP_START:
+		LOG_INF("[WiFi] STA DHCP start event mode=%s",
+			current_sta_cfg.ip_mode == WIFI_IP_MODE_STATIC ? "static" : "dhcp");
+		break;
 	case NET_EVENT_IPV4_DHCP_BOUND:
-		wifi_manager_notify_sta_ready("DHCP bound");
+		LOG_INF("[WiFi] STA DHCP bound event mode=%s",
+			current_sta_cfg.ip_mode == WIFI_IP_MODE_STATIC ? "static" : "dhcp");
+		if (current_sta_cfg.ip_mode == WIFI_IP_MODE_DHCP) {
+			sta_ipv4_seen_before_link = !sta_link_connected;
+		}
+		if (sta_link_connected && current_sta_cfg.ip_mode == WIFI_IP_MODE_DHCP) {
+			wifi_manager_notify_sta_ready("DHCP bound");
+		}
 		break;
 	case NET_EVENT_IPV4_ADDR_ADD:
-		wifi_manager_notify_sta_ready("IPv4 address added");
+		LOG_INF("[WiFi] STA IPv4 address add event link_connected=%d mode=%s",
+			sta_link_connected,
+			current_sta_cfg.ip_mode == WIFI_IP_MODE_STATIC ? "static" : "dhcp");
+		if (current_sta_cfg.ip_mode == WIFI_IP_MODE_DHCP) {
+			sta_ipv4_seen_before_link = !sta_link_connected;
+		}
+		if (sta_link_connected && current_sta_cfg.ip_mode == WIFI_IP_MODE_DHCP) {
+			wifi_manager_notify_sta_ready("IPv4 address added");
+		}
+		break;
+	case NET_EVENT_IPV4_ADDR_DEL:
+		LOG_INF("[WiFi] STA IPv4 address delete event");
 		break;
 	default:
 		break;
@@ -315,6 +424,8 @@ static int wifi_manager_setup_ap_ipv4(void)
 		return -ENODEV;
 	}
 
+	(void)net_if_up(ap_iface);
+
 	if (ap_ipv4_configured) {
 		return 0;
 	}
@@ -324,7 +435,6 @@ static int wifi_manager_setup_ap_ipv4(void)
 		return -EINVAL;
 	}
 
-	(void)net_if_up(ap_iface);
 	net_if_ipv4_set_gw(ap_iface, &addr);
 
 	if (net_if_ipv4_addr_add(ap_iface, &addr, NET_ADDR_MANUAL, 0) == NULL) {
@@ -388,7 +498,8 @@ int wifi_manager_init(wifi_manager_cb_t cb, void *user_data)
 	net_mgmt_init_event_callback(&wifi_cb, wifi_event_handler, WIFI_MANAGER_EVENT_MASK);
 	net_mgmt_add_event_callback(&wifi_cb);
 	net_mgmt_init_event_callback(&ipv4_cb, ipv4_event_handler,
-				     NET_EVENT_IPV4_DHCP_BOUND | NET_EVENT_IPV4_ADDR_ADD);
+				     NET_EVENT_IPV4_DHCP_START | NET_EVENT_IPV4_DHCP_BOUND | 
+				     NET_EVENT_IPV4_ADDR_ADD | NET_EVENT_IPV4_ADDR_DEL);
 	net_mgmt_add_event_callback(&ipv4_cb);
 
 	memset(&link_status, 0, sizeof(link_status));
@@ -431,7 +542,13 @@ int wifi_manager_start_ap(const wifi_ap_cfg_t *cfg)
 		ap.security == WIFI_SECURITY_TYPE_NONE ? "open" : "psk", ap_iface);
 	ap_start_requested = true;
 	ap_stop_requested = false;
-	return net_mgmt(NET_REQUEST_WIFI_AP_ENABLE, ap_iface, &ap, sizeof(ap));
+	ret = net_mgmt(NET_REQUEST_WIFI_AP_ENABLE, ap_iface, &ap, sizeof(ap));
+	if (ret == -EINPROGRESS || ret == -EALREADY) {
+		LOG_INF("SoftAP enable pending/already active: %d", ret);
+		return 0;
+	}
+
+	return ret;
 }
 
 int wifi_manager_stop_ap(void)
@@ -467,6 +584,7 @@ int wifi_manager_connect_sta(const wifi_sta_cfg_t *cfg)
 	sta_connect_requested = true;
 	sta_ready_notified = false;
 	sta_link_connected = false;
+	sta_ipv4_seen_before_link = false;
 	link_status.sta_ipv4[0] = '\0';
 	snprintk(link_status.sta_ssid, sizeof(link_status.sta_ssid), "%s", cfg->ssid);
 	wifi_manager_set_last_event("connecting");
@@ -487,8 +605,16 @@ int wifi_manager_connect_sta(const wifi_sta_cfg_t *cfg)
 	sta.channel = WIFI_CHANNEL_ANY;
 	sta.band = WIFI_FREQ_BAND_2_4_GHZ;
 
-	LOG_INF("[WiFi] STA connecting ssid=%s", cfg->ssid);
-	return net_mgmt(NET_REQUEST_WIFI_CONNECT, sta_iface, &sta, sizeof(sta));
+	LOG_INF("[WiFi] STA connecting ssid=%s security=%s ip_mode=%s",
+		cfg->ssid,
+		sta.security == WIFI_SECURITY_TYPE_PSK ? "psk" : "open",
+		cfg->ip_mode == WIFI_IP_MODE_STATIC ? "static" : "dhcp");
+	ret = net_mgmt(NET_REQUEST_WIFI_CONNECT, sta_iface, &sta, sizeof(sta));
+	if (ret < 0) {
+		LOG_ERR("[WiFi] STA connect request failed immediately: %d", ret);
+	}
+
+	return ret;
 }
 
 int wifi_manager_disconnect_sta(void)
@@ -501,6 +627,7 @@ int wifi_manager_disconnect_sta(void)
 	sta_connect_requested = false;
 	sta_ready_notified = false;
 	sta_link_connected = false;
+	sta_ipv4_seen_before_link = false;
 	link_status.sta_ipv4[0] = '\0';
 	wifi_manager_clear_sta_ipv4_state();
 	return net_mgmt(NET_REQUEST_WIFI_DISCONNECT, sta_iface, NULL, 0);
@@ -548,4 +675,28 @@ void wifi_manager_get_status(struct wifi_manager_status *status)
 			snprintk(status->sta_ipv4, sizeof(status->sta_ipv4), "%s", ip);
 		}
 	}
+}
+
+void wifi_manager_debug_dump(void)
+{
+	char ip[NET_IPV4_ADDR_LEN];
+
+	LOG_INF("=== WiFi Manager Debug Dump ===");
+	LOG_INF("sta_link_connected=%d", sta_link_connected);
+	LOG_INF("sta_connect_requested=%d", sta_connect_requested);
+	LOG_INF("sta_ready_notified=%d", sta_ready_notified);
+	LOG_INF("link_state=%s", link_state_name(link_status.link_state));
+	LOG_INF("ssid=%s", link_status.sta_ssid);
+	LOG_INF("last_event=%s", link_status.last_event);
+
+	if (wifi_manager_get_sta_ipv4(ip, sizeof(ip)) == 0 && ip[0] != '\0') {
+		LOG_INF("ip=%s", ip);
+	} else {
+		LOG_INF("ip=none");
+	}
+
+	LOG_INF("ap_active=%d", ap_active);
+	LOG_INF("ap_dhcp_running=%d", ap_dhcp_running);
+	LOG_INF("ap_client_connected=%d", ap_client_connected);
+	LOG_INF("==============================");
 }

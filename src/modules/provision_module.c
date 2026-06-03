@@ -12,14 +12,29 @@
 #include "modules/api_module.h"
 #include "modules/config_module.h"
 #include "modules/device_identity.h"
+#include "modules/rgb_module.h"
 #include "modules/wifi_manager.h"
 
 LOG_MODULE_REGISTER(provision_module, LOG_LEVEL_INF);
+
+static wifi_ip_mode_t ip_mode_from_string(const char *mode)
+{
+	if (mode == NULL) {
+		return WIFI_IP_MODE_DHCP;
+	}
+
+	if (strcmp(mode, "static") == 0) {
+		return WIFI_IP_MODE_STATIC;
+	}
+
+	return WIFI_IP_MODE_DHCP;
+}
 
 static enum provision_mode mode = PROVISION_MODE_BOOT;
 static bool provisioning_active;
 static bool sta_ready;
 static bool sta_connect_in_progress;
+static bool sta_retry_pending;
 static uint32_t connect_attempt;
 static wifi_sta_cfg_t pending_sta_cfg;
 static wifi_ap_cfg_t ap_cfg;
@@ -54,6 +69,22 @@ static void set_mode(enum provision_mode next)
 
 	mode = next;
 	LOG_INF("Provision mode -> %s", mode_name(next));
+
+	/* Update RGB status indicator */
+	switch (next) {
+	case PROVISION_MODE_BOOT:
+		rgb_module_set_network_status(RGB_STATUS_BOOT);
+		break;
+	case PROVISION_MODE_PROVISIONING:
+		rgb_module_set_network_status(RGB_STATUS_PROVISIONING);
+		break;
+	case PROVISION_MODE_CONNECTING:
+		rgb_module_set_network_status(RGB_STATUS_CONNECTING);
+		break;
+	case PROVISION_MODE_OPERATIONAL:
+		rgb_module_set_network_status(RGB_STATUS_OPERATIONAL);
+		break;
+	}
 }
 
 static void load_sta_cfg_from_config(wifi_sta_cfg_t *cfg)
@@ -63,6 +94,13 @@ static void load_sta_cfg_from_config(wifi_sta_cfg_t *cfg)
 	config_module_get(&config);
 	snprintk(cfg->ssid, sizeof(cfg->ssid), "%s", config.wifi_ssid);
 	snprintk(cfg->psk, sizeof(cfg->psk), "%s", config.wifi_psk);
+	cfg->ip_mode = ip_mode_from_string(config.wifi_ip_mode);
+	snprintk(cfg->ip_address, sizeof(cfg->ip_address), "%s",
+		 config.wifi_ip_address);
+	snprintk(cfg->netmask, sizeof(cfg->netmask), "%s",
+		 config.wifi_netmask);
+	snprintk(cfg->gateway, sizeof(cfg->gateway), "%s",
+		 config.wifi_gateway);
 }
 
 static void configure_softap_from_identity(void)
@@ -96,6 +134,11 @@ static int enter_provisioning_mode(void)
 	ret = wifi_manager_start_ap(&ap_cfg);
 	if (ret < 0) {
 		LOG_ERR("SoftAP start failed: %d", ret);
+		if (ret == -EINPROGRESS || ret == -EALREADY) {
+			LOG_INF("Retrying SoftAP start in %d ms", PROVISION_AP_RETRY_DELAY_MS);
+			(void)k_work_reschedule(&boot_fallback_ap_work,
+						K_MSEC(PROVISION_AP_RETRY_DELAY_MS));
+		}
 		return ret;
 	}
 
@@ -119,7 +162,7 @@ static int stop_provisioning_mode(void)
 	return 0;
 }
 
-static void schedule_sta_connect(void);
+static void schedule_sta_connect_after_ms(int32_t delay_ms);
 
 static void sta_connect_work_handler(struct k_work *work)
 {
@@ -127,10 +170,7 @@ static void sta_connect_work_handler(struct k_work *work)
 
 	ARG_UNUSED(work);
 
-	if (provisioning_active) {
-		LOG_INF("Starting STA connect while provisioning SoftAP remains active");
-	}
-
+	sta_retry_pending = false;
 	load_sta_cfg_from_config(&pending_sta_cfg);
 	if (pending_sta_cfg.ssid[0] == '\0') {
 		LOG_WRN("No STA credentials to connect");
@@ -141,13 +181,20 @@ static void sta_connect_work_handler(struct k_work *work)
 	connect_attempt++;
 	sta_connect_in_progress = true;
 	set_mode(PROVISION_MODE_CONNECTING);
+	LOG_INF("STA connect attempt %u/%u", (unsigned int)connect_attempt,
+		(unsigned int)PROVISION_STA_MAX_ATTEMPTS);
 
 	ret = wifi_manager_connect_sta(&pending_sta_cfg);
 	if (ret < 0) {
 		LOG_ERR("STA connect request failed: %d", ret);
 		sta_connect_in_progress = false;
 		(void)k_work_cancel_delayable(&connect_timeout_work);
-		(void)enter_provisioning_mode();
+		if (connect_attempt < PROVISION_STA_MAX_ATTEMPTS) {
+			sta_retry_pending = true;
+			schedule_sta_connect_after_ms(PROVISION_STA_RETRY_DELAY_MS);
+		} else {
+			(void)enter_provisioning_mode();
+		}
 	}
 }
 
@@ -162,6 +209,16 @@ static void connect_timeout_work_handler(struct k_work *work)
 	LOG_WRN("STA connect timed out after %d ms", PROVISION_STA_CONNECT_TIMEOUT_MS);
 	sta_connect_in_progress = false;
 	(void)wifi_manager_disconnect_sta();
+
+	if (connect_attempt < PROVISION_STA_MAX_ATTEMPTS) {
+		sta_retry_pending = true;
+		LOG_INF("Retrying STA connect in %d ms", PROVISION_STA_RETRY_DELAY_MS);
+		schedule_sta_connect_after_ms(PROVISION_STA_RETRY_DELAY_MS);
+		return;
+	}
+
+	LOG_WRN("STA failed after %u attempts; returning to provisioning",
+		(unsigned int)connect_attempt);
 	(void)enter_provisioning_mode();
 }
 
@@ -190,6 +247,13 @@ static void boot_fallback_ap_work_handler(struct k_work *work)
 		return;
 	}
 
+	if (sta_connect_in_progress || sta_retry_pending) {
+		LOG_INF("STA attempt still active; delaying fallback provisioning SoftAP");
+		(void)k_work_reschedule(&boot_fallback_ap_work,
+					K_MSEC(PROVISION_BOOT_FALLBACK_AP_DELAY_MS));
+		return;
+	}
+
 	LOG_WRN("STA not ready; opening fallback provisioning SoftAP");
 	(void)enter_provisioning_mode();
 }
@@ -198,16 +262,22 @@ static void sta_start_after_response_work_handler(struct k_work *work)
 {
 	ARG_UNUSED(work);
 
-	LOG_INF("Starting STA connect after API response; keeping SoftAP available");
-	schedule_sta_connect();
+	if (provisioning_active) {
+		LOG_INF("Stopping SoftAP before STA connect to free Wi-Fi resources");
+		(void)stop_provisioning_mode();
+		k_sleep(K_MSEC(200));
+	}
+
+	LOG_INF("Starting STA connect after API response");
+	schedule_sta_connect_after_ms(0);
 }
 
-static void schedule_sta_connect(void)
+static void schedule_sta_connect_after_ms(int32_t delay_ms)
 {
 	(void)k_work_cancel_delayable(&connect_timeout_work);
-	(void)k_work_reschedule(&sta_connect_work, K_NO_WAIT);
+	(void)k_work_reschedule(&sta_connect_work, K_MSEC(delay_ms));
 	(void)k_work_reschedule(&connect_timeout_work,
-				K_MSEC(PROVISION_STA_CONNECT_TIMEOUT_MS));
+				K_MSEC(delay_ms + PROVISION_STA_CONNECT_TIMEOUT_MS));
 }
 
 static void on_sta_operational(void)
@@ -216,6 +286,7 @@ static void on_sta_operational(void)
 
 	sta_ready = true;
 	sta_connect_in_progress = false;
+	sta_retry_pending = false;
 	connect_attempt = 0;
 	(void)k_work_cancel_delayable(&connect_timeout_work);
 	(void)k_work_cancel_delayable(&boot_fallback_ap_work);
@@ -225,9 +296,7 @@ static void on_sta_operational(void)
 
 	config_module_get(&config);
 	config_module_mark_wifi_provisioned(true);
-	if (config_module_save_wifi_credentials(config.wifi_ssid, config.wifi_psk) == 0) {
-		LOG_INF("Wi-Fi credentials confirmed in NVS");
-	}
+	LOG_INF("Wi-Fi station config confirmed in NVS");
 
 	(void)net_hostname_set(DEVICE_PORTAL_HOSTNAME, strlen(DEVICE_PORTAL_HOSTNAME));
 
@@ -279,8 +348,21 @@ static void wifi_manager_event_cb(wifi_manager_event_t event, void *user_data)
 		sta_ready = false;
 		sta_connect_in_progress = false;
 
+		if (sta_retry_pending) {
+			break;
+		}
+
 		if (config_module_has_wifi_credentials()) {
-			if (mode == PROVISION_MODE_OPERATIONAL) {
+			if (mode == PROVISION_MODE_CONNECTING &&
+			    connect_attempt < PROVISION_STA_MAX_ATTEMPTS) {
+				(void)k_work_cancel_delayable(&connect_timeout_work);
+				sta_retry_pending = true;
+				LOG_INF("STA failed; retry %u/%u in %d ms",
+					(unsigned int)(connect_attempt + 1U),
+					(unsigned int)PROVISION_STA_MAX_ATTEMPTS,
+					PROVISION_STA_RETRY_DELAY_MS);
+				schedule_sta_connect_after_ms(PROVISION_STA_RETRY_DELAY_MS);
+			} else if (mode == PROVISION_MODE_OPERATIONAL) {
 				set_mode(PROVISION_MODE_CONNECTING);
 				LOG_INF("STA lost; reconnect in %d ms",
 					PROVISION_STA_RECONNECT_DELAY_MS);
@@ -338,19 +420,19 @@ int provision_module_start(void)
 	set_mode(PROVISION_MODE_CONNECTING);
 	(void)k_work_reschedule(&boot_fallback_ap_work,
 				K_MSEC(PROVISION_BOOT_FALLBACK_AP_DELAY_MS));
-	schedule_sta_connect();
+	schedule_sta_connect_after_ms(0);
 	return 0;
 }
 
-int provision_module_submit_wifi(const char *ssid, const char *psk)
+int provision_module_submit_wifi(const wifi_sta_cfg_t *cfg)
 {
 	int ret;
 
-	if (!config_module_wifi_credentials_valid(ssid, psk)) {
+	if (cfg == NULL || !config_module_wifi_credentials_valid(cfg->ssid, cfg->psk)) {
 		return -EINVAL;
 	}
 
-	ret = config_module_save_wifi_credentials(ssid, psk);
+	ret = config_module_save_wifi_config(cfg);
 	if (ret < 0) {
 		return ret;
 	}
@@ -358,6 +440,7 @@ int provision_module_submit_wifi(const char *ssid, const char *psk)
 	load_sta_cfg_from_config(&pending_sta_cfg);
 	connect_attempt = 0;
 	sta_ready = false;
+	sta_retry_pending = false;
 
 	(void)k_work_cancel_delayable(&sta_reconnect_work);
 	(void)k_work_cancel_delayable(&boot_fallback_ap_work);
@@ -365,14 +448,14 @@ int provision_module_submit_wifi(const char *ssid, const char *psk)
 	(void)wifi_manager_disconnect_sta();
 
 	if (provisioning_active) {
-		LOG_INF("Wi-Fi credentials saved; STA connect starts %d ms after response, SoftAP stays active",
+		LOG_INF("Wi-Fi credentials saved; STA connect starts %d ms after response",
 			PROVISION_STA_START_AFTER_RESPONSE_MS);
 		(void)k_work_reschedule(&sta_start_after_response_work,
 					K_MSEC(PROVISION_STA_START_AFTER_RESPONSE_MS));
 		return 0;
 	}
 
-	schedule_sta_connect();
+	schedule_sta_connect_after_ms(0);
 	return 0;
 }
 
@@ -386,6 +469,7 @@ int provision_module_clear_wifi_and_reprovision(void)
 
 	sta_ready = false;
 	sta_connect_in_progress = false;
+	sta_retry_pending = false;
 	(void)wifi_manager_disconnect_sta();
 	(void)config_module_clear_wifi();
 

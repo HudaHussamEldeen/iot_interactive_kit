@@ -364,6 +364,7 @@ static int handle_status(int fd)
        "\"last_event\":\"%s\","
        "\"sta_ssid\":\"%s\","
        "\"sta_ipv4\":\"%s\","
+       "\"ip_mode\":\"%s\","
        "\"sta_ready\":%s,"
        "\"connect_attempt\":%u"
        "}"
@@ -375,17 +376,29 @@ static int handle_status(int fd)
        identity->softap_ssid, DEVICE_PORTAL_AP_IP, DEVICE_API_PORT,
        config.wifi_provisioned ? "true" : "false",
        wifi_link_state_to_string(wifi_status.link_state), wifi_status.last_event,
-       wifi_status.sta_ssid, wifi_status.sta_ipv4,
+       wifi_status.sta_ssid, wifi_status.sta_ipv4, config.wifi_ip_mode,
        provision_module_is_sta_ready() ? "true" : "false",
        (unsigned int)provision_module_get_connect_attempt());
 
   return send_response(fd, 200, "OK", "application/json", body);
 }
 
+static bool validate_ipv4_string(const char *addr)
+{
+	struct in_addr in_addr;
+
+	return addr != NULL && addr[0] != '\0' && net_addr_pton(AF_INET, addr, &in_addr) == 0;
+}
+
 static int handle_wifi_post(int fd, const char *request, const char *body)
 {
 	char ssid[KIT_WIFI_SSID_MAX_LEN];
 	char psk[KIT_WIFI_PSK_MAX_LEN] = "";
+	char ip_mode[KIT_WIFI_IP_MODE_MAX_LEN] = "dhcp";
+	char ip_address[KIT_IP_ADDR_MAX_LEN] = "";
+	char netmask[KIT_IP_ADDR_MAX_LEN] = "";
+	char gateway[KIT_IP_ADDR_MAX_LEN] = "";
+	wifi_sta_cfg_t cfg;
 	int ret;
 
 	if (provision_module_get_mode() == PROVISION_MODE_OPERATIONAL &&
@@ -402,10 +415,34 @@ static int handle_wifi_post(int fd, const char *request, const char *body)
 
 	(void)json_get_string(body, "psk", psk, sizeof(psk));
 	(void)json_get_string(body, "wifi_psk", psk, sizeof(psk));
+	(void)json_get_string(body, "ip_mode", ip_mode, sizeof(ip_mode));
+	(void)json_get_string(body, "wifi_ip_mode", ip_mode, sizeof(ip_mode));
+	(void)json_get_string(body, "ip_address", ip_address, sizeof(ip_address));
+	(void)json_get_string(body, "netmask", netmask, sizeof(netmask));
+	(void)json_get_string(body, "gateway", gateway, sizeof(gateway));
 
-	LOG_INF("Wi-Fi connection attempt requested for SSID: %s", ssid);
+	if (strcmp(ip_mode, "static") == 0) {
+		if (!validate_ipv4_string(ip_address) || !validate_ipv4_string(netmask)) {
+			return send_response(fd, 400, "Bad Request", "application/json",
+				     "{\"ok\":false,\"error\":\"invalid static IP or netmask\"}");
+		}
+		if (gateway[0] != '\0' && !validate_ipv4_string(gateway)) {
+			return send_response(fd, 400, "Bad Request", "application/json",
+				     "{\"ok\":false,\"error\":\"invalid gateway\"}");
+		}
+	}
 
-	ret = provision_module_submit_wifi(ssid, psk);
+	snprintk(cfg.ssid, sizeof(cfg.ssid), "%s", ssid);
+	snprintk(cfg.psk, sizeof(cfg.psk), "%s", psk);
+	cfg.ip_mode = strcmp(ip_mode, "static") == 0 ? WIFI_IP_MODE_STATIC : WIFI_IP_MODE_DHCP;
+	snprintk(cfg.ip_address, sizeof(cfg.ip_address), "%s", ip_address);
+	snprintk(cfg.netmask, sizeof(cfg.netmask), "%s", netmask);
+	snprintk(cfg.gateway, sizeof(cfg.gateway), "%s", gateway);
+
+	LOG_INF("Wi-Fi connection attempt requested for SSID: %s ip_mode=%s psk_len=%u",
+		ssid, ip_mode, (unsigned int)strlen(psk));
+
+	ret = provision_module_submit_wifi(&cfg);
 	if (ret < 0) {
 		return send_response(fd, 400, "Bad Request", "application/json",
 				     "{\"ok\":false,\"error\":\"invalid wifi credentials\"}");
