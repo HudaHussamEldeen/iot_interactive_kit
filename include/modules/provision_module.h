@@ -17,6 +17,8 @@ enum provision_mode {
 int provision_module_init(void);
 int provision_module_start(void);
 int provision_module_submit_wifi(const wifi_sta_cfg_t *cfg);
+int provision_module_connect_blocking(const wifi_sta_cfg_t *cfg, int32_t timeout_ms);
+void provision_module_schedule_ap_stop(int32_t delay_ms);
 int provision_module_clear_wifi_and_reprovision(void);
 enum provision_mode provision_module_get_mode(void);
 bool provision_module_is_provisioning_active(void);

@@ -130,8 +130,26 @@ int config_module_load(void)
 	current_config.wifi_provisioned = current_config.wifi_ssid[0] != '\0';
 	k_mutex_unlock(&config_lock);
 
-	LOG_INF("loaded device_id=%s wifi_saved=%d",
-		current_config.device_id, current_config.wifi_ssid[0] != '\0');
+	LOG_INF("--- NVS config loaded ---");
+	LOG_INF("  device_id    : %s", current_config.device_id);
+	LOG_INF("  wifi_ssid    : %s",
+		current_config.wifi_ssid[0] != '\0' ? current_config.wifi_ssid : "(not set)");
+	LOG_INF("  wifi_psk     : %s",
+		current_config.wifi_psk[0] != '\0' ? current_config.wifi_psk : "(not set)");
+	LOG_INF("  api_token    : %s",
+		current_config.api_token[0] != '\0' ? current_config.api_token : "(not set)");
+	LOG_INF("  ip_mode      : %s", current_config.wifi_ip_mode);
+	LOG_INF("  ip_address   : %s",
+		current_config.wifi_ip_address[0] != '\0' ? current_config.wifi_ip_address
+							   : "(not set)");
+	LOG_INF("  netmask      : %s",
+		current_config.wifi_netmask[0] != '\0' ? current_config.wifi_netmask
+						       : "(not set)");
+	LOG_INF("  gateway      : %s",
+		current_config.wifi_gateway[0] != '\0' ? current_config.wifi_gateway
+						       : "(not set)");
+	LOG_INF("  provisioned  : %s", current_config.wifi_provisioned ? "yes" : "no");
+	LOG_INF("-------------------------");
 
 	return 0;
 }
@@ -303,6 +321,46 @@ int config_module_mark_wifi_provisioned(bool provisioned)
 	current_config.wifi_provisioned = provisioned;
 	k_mutex_unlock(&config_lock);
 
+	return 0;
+}
+
+int config_module_factory_reset(void)
+{
+	static const char *const keys[] = {
+		"iot_kit/device_id",
+		"iot_kit/wifi_ssid",
+		"iot_kit/wifi_psk",
+		"iot_kit/api_token",
+		"iot_kit/wifi_ip_mode",
+		"iot_kit/wifi_ip_address",
+		"iot_kit/wifi_netmask",
+		"iot_kit/wifi_gateway",
+	};
+
+	LOG_WRN("Factory reset: erasing all NVS config");
+
+	k_mutex_lock(&config_lock, K_FOREVER);
+
+	for (int i = 0; i < ARRAY_SIZE(keys); i++) {
+		(void)settings_delete(keys[i]);
+	}
+
+	struct kit_config defaults = {
+		.device_id      = "iot-kit-esp32s3",
+		.wifi_ssid      = "",
+		.wifi_psk       = "",
+		.api_token      = "iot-kit-dev",
+		.wifi_ip_mode   = "dhcp",
+		.wifi_ip_address = "",
+		.wifi_netmask   = "",
+		.wifi_gateway   = "",
+		.wifi_provisioned = false,
+	};
+	current_config = defaults;
+
+	k_mutex_unlock(&config_lock);
+
+	LOG_WRN("Factory reset: NVS cleared");
 	return 0;
 }
 

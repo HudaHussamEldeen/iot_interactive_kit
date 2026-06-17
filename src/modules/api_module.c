@@ -12,7 +12,10 @@
 #include "device_profile.h"
 #include "modules/config_module.h"
 #include "modules/device_identity.h"
+#include "modules/mpu6050_module.h"
 #include "modules/provision_module.h"
+#include "modules/servo_module.h"
+#include "modules/vl6180x_module.h"
 
 LOG_MODULE_REGISTER(api_module, LOG_LEVEL_INF);
 
@@ -298,6 +301,55 @@ static bool json_get_string(const char *json, const char *key, char *out, size_t
 	return true;
 }
 
+static bool json_get_int(const char *json, const char *key, int *out)
+{
+	char pattern[36];
+	const char *start;
+	int value = 0;
+	bool negative = false;
+
+	if (json == NULL || key == NULL || out == NULL) {
+		return false;
+	}
+
+	snprintk(pattern, sizeof(pattern), "\"%s\"", key);
+	start = strstr(json, pattern);
+	if (start == NULL) {
+		return false;
+	}
+
+	start += strlen(pattern);
+	while (*start == ' ' || *start == '\t' || *start == '\r' || *start == '\n') {
+		start++;
+	}
+
+	if (*start != ':') {
+		return false;
+	}
+
+	start++;
+	while (*start == ' ' || *start == '\t' || *start == '\r' || *start == '\n') {
+		start++;
+	}
+
+	if (*start == '-') {
+		negative = true;
+		start++;
+	}
+
+	if (*start < '0' || *start > '9') {
+		return false;
+	}
+
+	while (*start >= '0' && *start <= '9') {
+		value = value * 10 + (*start - '0');
+		start++;
+	}
+
+	*out = negative ? -value : value;
+	return true;
+}
+
 static bool auth_header_valid(const char *request)
 {
 	struct kit_config config;
@@ -439,19 +491,64 @@ static int handle_wifi_post(int fd, const char *request, const char *body)
 	snprintk(cfg.netmask, sizeof(cfg.netmask), "%s", netmask);
 	snprintk(cfg.gateway, sizeof(cfg.gateway), "%s", gateway);
 
-	LOG_INF("Wi-Fi connection attempt requested for SSID: %s ip_mode=%s psk_len=%u",
-		ssid, ip_mode, (unsigned int)strlen(psk));
+	/* Total blocking timeout: all attempts × (connect timeout + retry delay) + margin */
+	int32_t timeout_ms = (int32_t)PROVISION_STA_MAX_ATTEMPTS *
+			     ((int32_t)PROVISION_STA_CONNECT_TIMEOUT_MS +
+			      (int32_t)PROVISION_STA_RETRY_DELAY_MS) + 5000;
 
-	ret = provision_module_submit_wifi(&cfg);
+	LOG_INF("Attempting WiFi connect ssid=%s ip_mode=%s (blocking, timeout=%d ms)",
+		ssid, ip_mode, (int)timeout_ms);
+
+	ret = provision_module_connect_blocking(&cfg, timeout_ms);
 	if (ret < 0) {
-		return send_response(fd, 400, "Bad Request", "application/json",
-				     "{\"ok\":false,\"error\":\"invalid wifi credentials\"}");
+		LOG_WRN("WiFi connect failed ret=%d ssid=%s", ret, ssid);
+		return send_response(fd, 200, "OK", "application/json",
+				     "{\"ok\":false,\"error\":\"connection failed\","
+				     "\"status\":\"failed\"}");
 	}
 
-	return send_response(fd, 202, "Accepted", "application/json",
-			     "{\"ok\":true,\"status\":\"connecting\","
-			     "\"next\":\"operational_on_success\","
-			     "\"status_url\":\"/api/v1/status\"}");
+	/* Connected — now save credentials to NVS */
+	ret = config_module_save_wifi_config(&cfg);
+	if (ret < 0) {
+		LOG_ERR("Failed to save WiFi config: %d", ret);
+		return send_response(fd, 500, "Internal Server Error", "application/json",
+				     "{\"ok\":false,\"error\":\"failed to save credentials\"}");
+	}
+
+	/* Verify the save was successful */
+	{
+		struct kit_config saved;
+
+		config_module_get(&saved);
+		if (strncmp(saved.wifi_ssid, cfg.ssid, sizeof(saved.wifi_ssid) - 1U) != 0) {
+			LOG_ERR("Credential verify failed: SSID mismatch after save");
+			return send_response(fd, 500, "Internal Server Error", "application/json",
+					     "{\"ok\":false,\"error\":\"credential verify failed\"}");
+		}
+	}
+
+	config_module_mark_wifi_provisioned(true);
+
+	/* Get assigned IP for the response */
+	char ip[NET_IPV4_ADDR_LEN];
+
+	if (provision_module_get_sta_ipv4(ip, sizeof(ip)) != 0 || ip[0] == '\0') {
+		snprintk(ip, sizeof(ip), "0.0.0.0");
+	}
+
+	char resp[256];
+
+	snprintk(resp, sizeof(resp),
+		 "{\"ok\":true,\"status\":\"connected\","
+		 "\"ssid\":\"%s\",\"ip\":\"%s\"}",
+		 cfg.ssid, ip);
+
+	ret = send_response(fd, 200, "OK", "application/json", resp);
+
+	/* Stop SoftAP after response is flushed (AP was kept up during connect) */
+	provision_module_schedule_ap_stop(1000);
+
+	return ret;
 }
 
 static int handle_config_get(int fd)
@@ -507,6 +604,115 @@ static int handle_provision_reset_post(int fd, const char *request)
 
 	return send_response(fd, 200, "OK", "application/json",
 			     "{\"ok\":true,\"status\":\"provisioning\"}");
+}
+
+/* Helpers for formatting sensor_value int pairs as JSON numbers */
+#define SV_SIGN(v1, v2) (((v1) < 0 || (v2) < 0) ? "-" : "")
+#define SV_ABS(v)       ((int)((v) < 0 ? -(v) : (v)))
+
+static int handle_imu_get(int fd, const char *request)
+{
+	struct mpu6050_reading r;
+	char body[512];
+	int ret;
+
+	if (!auth_header_valid(request)) {
+		return send_response(fd, 401, "Unauthorized", "application/json",
+				     "{\"ok\":false,\"error\":\"invalid bearer token\"}");
+	}
+
+	ret = mpu6050_module_read(&r);
+	if (ret < 0) {
+		return send_response(fd, 503, "Service Unavailable", "application/json",
+				     "{\"ok\":false,\"error\":\"IMU not available\"}");
+	}
+
+	snprintk(body, sizeof(body),
+		 "{\"ok\":true,\"data\":{"
+		 "\"accel\":{\"x\":%s%d.%06d,\"y\":%s%d.%06d,\"z\":%s%d.%06d},"
+		 "\"gyro\":{\"x\":%s%d.%06d,\"y\":%s%d.%06d,\"z\":%s%d.%06d},"
+		 "\"temperature\":%s%d.%06d"
+		 "}}",
+		 SV_SIGN(r.accel_x_1, r.accel_x_2), SV_ABS(r.accel_x_1), SV_ABS(r.accel_x_2),
+		 SV_SIGN(r.accel_y_1, r.accel_y_2), SV_ABS(r.accel_y_1), SV_ABS(r.accel_y_2),
+		 SV_SIGN(r.accel_z_1, r.accel_z_2), SV_ABS(r.accel_z_1), SV_ABS(r.accel_z_2),
+		 SV_SIGN(r.gyro_x_1,  r.gyro_x_2),  SV_ABS(r.gyro_x_1),  SV_ABS(r.gyro_x_2),
+		 SV_SIGN(r.gyro_y_1,  r.gyro_y_2),  SV_ABS(r.gyro_y_1),  SV_ABS(r.gyro_y_2),
+		 SV_SIGN(r.gyro_z_1,  r.gyro_z_2),  SV_ABS(r.gyro_z_1),  SV_ABS(r.gyro_z_2),
+		 SV_SIGN(r.temp_1,    r.temp_2),     SV_ABS(r.temp_1),    SV_ABS(r.temp_2));
+
+	return send_response(fd, 200, "OK", "application/json", body);
+}
+
+static int handle_tof_get(int fd, const char *request)
+{
+	char body[64];
+	uint8_t range_mm;
+	int ret;
+
+	if (!auth_header_valid(request)) {
+		return send_response(fd, 401, "Unauthorized", "application/json",
+				     "{\"ok\":false,\"error\":\"invalid bearer token\"}");
+	}
+
+	ret = vl6180x_module_read_range(&range_mm);
+	if (ret < 0) {
+		return send_response(fd, 503, "Service Unavailable", "application/json",
+				     "{\"ok\":false,\"error\":\"ToF sensor not available\"}");
+	}
+
+	snprintk(body, sizeof(body),
+		 "{\"ok\":true,\"data\":{\"range_mm\":%u}}", (unsigned int)range_mm);
+
+	return send_response(fd, 200, "OK", "application/json", body);
+}
+
+static int handle_servo_get(int fd, const char *request)
+{
+	char body[64];
+
+	if (!auth_header_valid(request)) {
+		return send_response(fd, 401, "Unauthorized", "application/json",
+				     "{\"ok\":false,\"error\":\"invalid bearer token\"}");
+	}
+
+	snprintk(body, sizeof(body),
+		 "{\"ok\":true,\"data\":{\"angle\":%d}}", servo_module_get_angle());
+
+	return send_response(fd, 200, "OK", "application/json", body);
+}
+
+static int handle_servo_post(int fd, const char *request, const char *body)
+{
+	char resp[64];
+	int angle;
+	int ret;
+
+	if (!auth_header_valid(request)) {
+		return send_response(fd, 401, "Unauthorized", "application/json",
+				     "{\"ok\":false,\"error\":\"invalid bearer token\"}");
+	}
+
+	if (!json_get_int(body, "angle", &angle)) {
+		return send_response(fd, 400, "Bad Request", "application/json",
+				     "{\"ok\":false,\"error\":\"missing or invalid angle\"}");
+	}
+
+	if (angle < 0 || angle > 180) {
+		return send_response(fd, 400, "Bad Request", "application/json",
+				     "{\"ok\":false,\"error\":\"angle must be 0-180\"}");
+	}
+
+	ret = servo_module_set_angle(angle);
+	if (ret < 0) {
+		return send_response(fd, 500, "Internal Server Error", "application/json",
+				     "{\"ok\":false,\"error\":\"servo set failed\"}");
+	}
+
+	snprintk(resp, sizeof(resp),
+		 "{\"ok\":true,\"data\":{\"angle\":%d}}", angle);
+
+	return send_response(fd, 200, "OK", "application/json", resp);
 }
 
 static void extract_request_parts(char *request, char **method, char **path, char **body)
@@ -602,6 +808,26 @@ static void handle_client(int client_fd)
 	} else if (strcmp(method, "POST") == 0 &&
 		   strcmp(path, "/api/v1/provision/reset") == 0) {
 		int ret = handle_provision_reset_post(client_fd, raw_request);
+
+		LOG_INF("HTTP %s %s complete ret=%d", method, path, ret);
+	} else if (strcmp(method, "GET") == 0 &&
+		   strcmp(path, "/api/v1/sensors/imu") == 0) {
+		int ret = handle_imu_get(client_fd, raw_request);
+
+		LOG_INF("HTTP %s %s complete ret=%d", method, path, ret);
+	} else if (strcmp(method, "GET") == 0 &&
+		   strcmp(path, "/api/v1/sensors/tof") == 0) {
+		int ret = handle_tof_get(client_fd, raw_request);
+
+		LOG_INF("HTTP %s %s complete ret=%d", method, path, ret);
+	} else if (strcmp(method, "GET") == 0 &&
+		   strcmp(path, "/api/v1/servo") == 0) {
+		int ret = handle_servo_get(client_fd, raw_request);
+
+		LOG_INF("HTTP %s %s complete ret=%d", method, path, ret);
+	} else if (strcmp(method, "POST") == 0 &&
+		   strcmp(path, "/api/v1/servo") == 0) {
+		int ret = handle_servo_post(client_fd, raw_request, body);
 
 		LOG_INF("HTTP %s %s complete ret=%d", method, path, ret);
 	} else {

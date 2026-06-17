@@ -10,6 +10,11 @@ target_sources(app PRIVATE
 	src/modules/device_identity.c
 	src/modules/provision_module.c
 	src/modules/rgb_module.c
+	src/modules/buzzer_module.c
+	src/modules/mpu6050_module.c
+	src/modules/reset_button_module.c
+	src/modules/vl6180x_module.c
+	src/modules/servo_module.c
 	src/modules/wifi_manager.c
 )
 

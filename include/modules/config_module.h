@@ -36,5 +36,6 @@ int config_module_save_wifi_credentials(const char *ssid, const char *psk);
 int config_module_save_wifi_config(const wifi_sta_cfg_t *cfg);
 int config_module_mark_wifi_provisioned(bool provisioned);
 int config_module_clear_wifi(void);
+int config_module_factory_reset(void);
 
 #endif /* MODULES_CONFIG_MODULE_H_ */

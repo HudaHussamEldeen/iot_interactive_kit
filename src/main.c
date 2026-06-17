@@ -5,6 +5,11 @@
 #include "modules/config_module.h"
 #include "modules/provision_module.h"
 #include "modules/rgb_module.h"
+#include "modules/buzzer_module.h"
+#include "modules/mpu6050_module.h"
+#include "modules/reset_button_module.h"
+#include "modules/vl6180x_module.h"
+#include "modules/servo_module.h"
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
@@ -30,6 +35,31 @@ int main(void)
 	if (ret < 0) {
 		LOG_ERR("RGB init failed: %d", ret);
 		return 0;
+	}
+
+	ret = buzzer_module_init();
+	if (ret < 0) {
+		LOG_WRN("Buzzer init failed: %d", ret);
+	}
+
+	ret = reset_button_module_init();
+	if (ret < 0) {
+		LOG_WRN("Reset button init failed: %d", ret);
+	}
+
+	ret = mpu6050_module_init();
+	if (ret < 0) {
+		LOG_WRN("MPU6050 init failed: %d", ret);
+	}
+
+	ret = vl6180x_module_init();
+	if (ret < 0) {
+		LOG_WRN("VL6180X init failed: %d", ret);
+	}
+
+	ret = servo_module_init();
+	if (ret < 0) {
+		LOG_WRN("Servo init failed: %d", ret);
 	}
 
 	ret = provision_module_init();
