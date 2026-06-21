@@ -172,6 +172,52 @@ curl -X POST http://192.168.4.1:8080/api/v1/wifi \
 
 ---
 
+#### `POST /api/v1/buzzer` — Buzzer Control
+
+**Auth required.**
+
+| Action | Description |
+|---|---|
+| `on` | Turn buzzer on continuously at given frequency |
+| `off` | Turn buzzer off |
+| `beep` | Beep for a fixed duration (blocks until done) |
+
+**Turn on:**
+```sh
+curl -X POST http://<device_ip>:8080/api/v1/buzzer \
+  -H 'Authorization: Bearer iot-kit-dev' \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"on","freq":2000}'
+```
+
+**Turn off:**
+```sh
+curl -X POST http://<device_ip>:8080/api/v1/buzzer \
+  -H 'Authorization: Bearer iot-kit-dev' \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"off"}'
+```
+
+**Beep:**
+```sh
+curl -X POST http://<device_ip>:8080/api/v1/buzzer \
+  -H 'Authorization: Bearer iot-kit-dev' \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"beep","freq":1000,"duration_ms":300}'
+```
+
+```json
+{ "ok": true }
+```
+
+| Field | Required for | Range |
+|---|---|---|
+| `action` | always | `on`, `off`, `beep` |
+| `freq` | `on`, `beep` | 100–20000 Hz |
+| `duration_ms` | `beep` | 1–5000 ms |
+
+---
+
 #### `GET /api/v1/sensors/imu` — IMU (MPU6050)
 
 Reads accelerometer, gyroscope, and die temperature on demand.

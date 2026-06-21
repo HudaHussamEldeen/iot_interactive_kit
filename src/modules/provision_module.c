@@ -166,8 +166,9 @@ static void sta_connect_work_handler(struct k_work *work)
 
 	sta_retry_pending = false;
 
-	/* During blocking connect, use the caller-supplied cfg, not NVS */
-	if (!use_pending_cfg) {
+	/* During blocking connect credentials are not yet in NVS — always use
+	 * the caller-supplied pending_sta_cfg instead of loading from NVS. */
+	if (!use_pending_cfg && !blocking_connect_active) {
 		load_sta_cfg_from_config(&pending_sta_cfg);
 	}
 	use_pending_cfg = false;
@@ -240,6 +241,8 @@ static void connect_timeout_work_handler(struct k_work *work)
 	/* All attempts exhausted */
 	if (blocking_connect_active) {
 		LOG_WRN("Blocking connect: all %u attempts failed", (unsigned int)connect_attempt);
+		/* AP is still up — return RGB to provisioning state */
+		set_mode(PROVISION_MODE_PROVISIONING);
 		connect_result_success = false;
 		blocking_connect_active = false;
 		k_sem_give(&connect_result_sem);

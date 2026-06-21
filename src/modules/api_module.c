@@ -10,6 +10,7 @@
 #include <zephyr/sys/util.h>
 
 #include "device_profile.h"
+#include "modules/buzzer_module.h"
 #include "modules/config_module.h"
 #include "modules/device_identity.h"
 #include "modules/mpu6050_module.h"
@@ -546,7 +547,7 @@ static int handle_wifi_post(int fd, const char *request, const char *body)
 	ret = send_response(fd, 200, "OK", "application/json", resp);
 
 	/* Stop SoftAP after response is flushed (AP was kept up during connect) */
-	provision_module_schedule_ap_stop(1000);
+	provision_module_schedule_ap_stop(300);
 
 	return ret;
 }
@@ -604,6 +605,51 @@ static int handle_provision_reset_post(int fd, const char *request)
 
 	return send_response(fd, 200, "OK", "application/json",
 			     "{\"ok\":true,\"status\":\"provisioning\"}");
+}
+
+static int handle_buzzer_post(int fd, const char *request, const char *body)
+{
+	char action[16] = "";
+	int freq = 1000;
+	int duration_ms = 200;
+
+	if (!auth_header_valid(request)) {
+		return send_response(fd, 401, "Unauthorized", "application/json",
+				     "{\"ok\":false,\"error\":\"invalid bearer token\"}");
+	}
+
+	if (!json_get_string(body, "action", action, sizeof(action))) {
+		return send_response(fd, 400, "Bad Request", "application/json",
+				     "{\"ok\":false,\"error\":\"missing action\"}");
+	}
+
+	if (strcmp(action, "on") == 0) {
+		(void)json_get_int(body, "freq", &freq);
+		if (freq < 100 || freq > 20000) {
+			return send_response(fd, 400, "Bad Request", "application/json",
+					     "{\"ok\":false,\"error\":\"freq must be 100-20000 Hz\"}");
+		}
+		buzzer_module_on((uint32_t)freq);
+	} else if (strcmp(action, "off") == 0) {
+		buzzer_module_off();
+	} else if (strcmp(action, "beep") == 0) {
+		(void)json_get_int(body, "freq", &freq);
+		(void)json_get_int(body, "duration_ms", &duration_ms);
+		if (freq < 100 || freq > 20000) {
+			return send_response(fd, 400, "Bad Request", "application/json",
+					     "{\"ok\":false,\"error\":\"freq must be 100-20000 Hz\"}");
+		}
+		if (duration_ms < 1 || duration_ms > 5000) {
+			return send_response(fd, 400, "Bad Request", "application/json",
+					     "{\"ok\":false,\"error\":\"duration_ms must be 1-5000\"}");
+		}
+		buzzer_module_beep((uint32_t)freq, (uint32_t)duration_ms);
+	} else {
+		return send_response(fd, 400, "Bad Request", "application/json",
+				     "{\"ok\":false,\"error\":\"action must be on/off/beep\"}");
+	}
+
+	return send_response(fd, 200, "OK", "application/json", "{\"ok\":true}");
 }
 
 /* Helpers for formatting sensor_value int pairs as JSON numbers */
@@ -808,6 +854,11 @@ static void handle_client(int client_fd)
 	} else if (strcmp(method, "POST") == 0 &&
 		   strcmp(path, "/api/v1/provision/reset") == 0) {
 		int ret = handle_provision_reset_post(client_fd, raw_request);
+
+		LOG_INF("HTTP %s %s complete ret=%d", method, path, ret);
+	} else if (strcmp(method, "POST") == 0 &&
+		   strcmp(path, "/api/v1/buzzer") == 0) {
+		int ret = handle_buzzer_post(client_fd, raw_request, body);
 
 		LOG_INF("HTTP %s %s complete ret=%d", method, path, ret);
 	} else if (strcmp(method, "GET") == 0 &&
