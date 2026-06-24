@@ -1,0 +1,62 @@
+cmake:
+  application:
+    configuration-dir: '/home/huda-hussam/zephyrproject/iot_interactive_kit'
+    source-dir: '/home/huda-hussam/zephyrproject/iot_interactive_kit'
+  board:
+    name: 'esp32s3_devkitc'
+    path:
+     - '/home/huda-hussam/zephyrproject/zephyr/boards/espressif/esp32s3_devkitc'
+    qualifiers: 'esp32s3/procpu'
+    revision: ''
+  devicetree:
+    bindings-dirs:
+     - '/home/huda-hussam/zephyrproject/zephyr/dts/bindings'
+    files:
+     - '/home/huda-hussam/zephyrproject/zephyr/boards/espressif/esp32s3_devkitc/esp32s3_devkitc_procpu.dts'
+     - '/home/huda-hussam/zephyrproject/iot_interactive_kit/boards/esp32s3_devkitc_esp32s3_procpu.overlay'
+    include-dirs:
+     - '/home/huda-hussam/zephyrproject/modules/hal/ambiq/dts'
+     - '/home/huda-hussam/zephyrproject/modules/hal/atmel/include'
+     - '/home/huda-hussam/zephyrproject/modules/hal/bouffalolab/include'
+     - '/home/huda-hussam/zephyrproject/modules/hal/bouffalolab/include/zephyr'
+     - '/home/huda-hussam/zephyrproject/modules/hal/gigadevice/include'
+     - '/home/huda-hussam/zephyrproject/modules/hal/microchip/include'
+     - '/home/huda-hussam/zephyrproject/modules/hal/microchip/dts'
+     - '/home/huda-hussam/zephyrproject/modules/hal/nuvoton/dts'
+     - '/home/huda-hussam/zephyrproject/modules/hal/nxp/dts'
+     - '/home/huda-hussam/zephyrproject/modules/hal/stm32/dts'
+     - '/home/huda-hussam/zephyrproject/modules/hal/ti/dts'
+     - '/home/huda-hussam/zephyrproject/iot_interactive_kit/include'
+     - '/home/huda-hussam/zephyrproject/zephyr/include'
+     - '/home/huda-hussam/zephyrproject/zephyr/include/zephyr'
+     - '/home/huda-hussam/zephyrproject/zephyr/dts/common'
+     - '/home/huda-hussam/zephyrproject/zephyr/dts/vendor'
+     - '/home/huda-hussam/zephyrproject/zephyr/dts/rx'
+     - '/home/huda-hussam/zephyrproject/zephyr/dts/x86'
+     - '/home/huda-hussam/zephyrproject/zephyr/dts/xtensa'
+     - '/home/huda-hussam/zephyrproject/zephyr/dts/sparc'
+     - '/home/huda-hussam/zephyrproject/zephyr/dts/riscv'
+     - '/home/huda-hussam/zephyrproject/zephyr/dts/posix'
+     - '/home/huda-hussam/zephyrproject/zephyr/dts/arm64'
+     - '/home/huda-hussam/zephyrproject/zephyr/dts/arm'
+     - '/home/huda-hussam/zephyrproject/zephyr/dts/arc'
+     - '/home/huda-hussam/zephyrproject/zephyr/dts'
+    user-files:
+     - '/home/huda-hussam/zephyrproject/iot_interactive_kit/boards/esp32s3_devkitc_esp32s3_procpu.overlay'
+  kconfig:
+    files:
+     - '/home/huda-hussam/zephyrproject/zephyr/boards/espressif/esp32s3_devkitc/esp32s3_devkitc_procpu_defconfig'
+     - '/home/huda-hussam/zephyrproject/iot_interactive_kit/prj.conf'
+    user-files:
+     - '/home/huda-hussam/zephyrproject/iot_interactive_kit/prj.conf'
+  toolchain:
+    name: 'zephyr'
+    path: '/home/huda-hussam/zephyr-sdk-1.0.1'
+  zephyr:
+    version: '4.4.0-rc3'
+    zephyr-base: '/home/huda-hussam/zephyrproject/zephyr'
+version: '0.1.0'
+west:
+  command: '/home/huda-hussam/zephyrproject/.venv/bin/west build -p always -b esp32s3_devkitc/esp32s3/procpu iot_interactive_kit'
+  topdir: '/home/huda-hussam/zephyrproject'
+  version: '1.5.0'

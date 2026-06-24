@@ -2,6 +2,8 @@
 
 Zephyr RTOS application for an ESP32-S3 DevKit C based interactive IoT kit with production-style Wi-Fi provisioning, sensor APIs, servo control, and factory reset.
 
+A smart IoT device that connects to Wi-Fi and lets you control and monitor real-world hardware remotely. It exposes a REST API on port 8080 and comes with a Python desktop app for full visual control. Outputs include 2 relays, 3 LEDs, a DC motor, servo, and buzzer. Inputs include temperature & humidity (DHT22), distance (ToF), motion (IMU), light level (LDR), water level, magnetic switch, and a user button. On first boot a SoftAP hotspot opens for easy Wi-Fi setup — credentials are saved to flash and restored on every reboot.
+
 ## Hardware
 
 | Peripheral | Interface | Pin(s) |
