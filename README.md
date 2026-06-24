@@ -1,8 +1,8 @@
 # IoT Interactive Kit
 
-Zephyr RTOS application for an ESP32-S3 DevKit C based interactive IoT kit with production-style Wi-Fi provisioning, sensor APIs, servo control, and factory reset.
+The **IoT Interactive Kit** is a fully-featured smart device built on the ESP32-S3 microcontroller running Zephyr RTOS. It connects to your Wi-Fi network and exposes a REST API on port 8080, letting you control and monitor real-world hardware from anywhere on your network.
 
-A smart IoT device that connects to Wi-Fi and lets you control and monitor real-world hardware remotely. It exposes a REST API on port 8080 and comes with a Python desktop app for full visual control. Outputs include 2 relays, 3 LEDs, a DC motor, servo, and buzzer. Inputs include temperature & humidity (DHT22), distance (ToF), motion (IMU), light level (LDR), water level, magnetic switch, and a user button. On first boot a SoftAP hotspot opens for easy Wi-Fi setup — credentials are saved to flash and restored on every reboot.
+The kit supports a wide range of outputs — relays, LEDs, a DC motor, servo, and buzzer — and reads from multiple sensors including DHT22 (temperature & humidity), a Time-of-Flight distance sensor, an IMU (MPU6050), light level (LDR), water level, magnetic switch, and a user button. A Python desktop app provides full visual control without writing any code. On first boot, the device opens a Wi-Fi hotspot for easy setup; credentials are saved to flash and automatically restored on every reboot.
 
 ## Hardware
 
