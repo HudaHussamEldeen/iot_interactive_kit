@@ -622,3 +622,20 @@ source zephyr/zephyr-env.sh
 west build -p always -b esp32s3_devkitc/esp32s3/procpu iot_interactive_kit
 west flash -d iot_interactive_kit/build
 ```
+
+---
+
+## Screenshots
+
+| Wi-Fi Provisioning | Sensors |
+|---|---|
+| ![Provision](desktopapp_screenshots/Screenshot%20from%202026-06-24%2014-45-18.png) | ![Sensors](desktopapp_screenshots/Screenshot%20from%202026-06-24%2014-41-31.png) |
+
+---
+
+## Author
+
+**Huda Hussam Eldeen**
+
+- GitHub: [github.com/HudaHussamEldeen](https://github.com/HudaHussamEldeen)
+- LinkedIn: [linkedin.com/in/huda-hussam-eldeen](https://www.linkedin.com/in/huda-hussam-eldeen/)
