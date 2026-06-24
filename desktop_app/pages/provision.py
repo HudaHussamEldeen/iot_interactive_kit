@@ -85,6 +85,7 @@ class ProvisionPage(ctk.CTkFrame):
         self.info_box = ctk.CTkTextbox(self, height=120, state="disabled", font=ctk.CTkFont(size=12))
         self.info_box.pack(padx=40, pady=(0, 16), fill="x")
 
+        self._poll_job = None
         self._fetch_status()
 
     def _on_ip_mode(self, value):
@@ -189,5 +190,18 @@ class ProvisionPage(ctk.CTkFrame):
                 self.after(0, lambda err=e: self._set_status(f"Reset error: {err}", "#e74c3c"))
         threading.Thread(target=task, daemon=True).start()
 
-    def on_show(self):
+    def _start_poll(self):
+        self._stop_poll()
         self._fetch_status()
+        self._poll_job = self.after(20000, self._start_poll)
+
+    def _stop_poll(self):
+        if self._poll_job is not None:
+            self.after_cancel(self._poll_job)
+            self._poll_job = None
+
+    def on_show(self):
+        self._start_poll()
+
+    def on_hide(self):
+        self._stop_poll()

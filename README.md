@@ -10,7 +10,18 @@ Zephyr RTOS application for an ESP32-S3 DevKit C based interactive IoT kit with 
 | Servo motor | PWM (LEDC0) | GPIO6 |
 | MPU6050 IMU | I2C0 | SDA=GPIO1, SCL=GPIO2 |
 | VL6180X ToF | I2C0 | SDA=GPIO1, SCL=GPIO2, addr=0x29 |
-| Buzzer | PWM | — |
+| DHT22 temp/humidity | GPIO (1-wire) | GPIO21 |
+| Magnetic switch | GPIO input | GPIO40 |
+| User button | GPIO input (active low) | GPIO41 |
+| Relay 1 | GPIO output | GPIO12 |
+| Relay 2 | GPIO output | GPIO13 |
+| LDR (light) | ADC1 CH8 | GPIO9 |
+| Water level | ADC1 CH9 | GPIO10 |
+| Buzzer | PWM (LEDC0) | GPIO11 |
+| LED 1 | GPIO output | GPIO7 |
+| LED 2 | GPIO output | GPIO8 |
+| LED 3 | GPIO output | GPIO3 |
+| DC motor (IN1/IN2) | PWM (LEDC0 CH3/CH4) | GPIO15, GPIO16 |
 | Factory reset button | GPIO0 | BOOT button (built-in) |
 
 ---
@@ -24,10 +35,16 @@ Zephyr RTOS application for an ESP32-S3 DevKit C based interactive IoT kit with 
 | `provision_module` | Provisioning state machine and reconnect policy |
 | `config_module` | NVS persistence via Zephyr Settings |
 | `api_module` | REST API on port 8080 |
+| `relay_module` | Relay 1 & 2 GPIO outputs |
+| `gpio_inputs_module` | Magnetic switch + button GPIO inputs |
+| `analog_module` | LDR + water level via ADC1 |
+| `dht22_module` | DHT22 temperature & humidity |
 | `rgb_module` | WS2812 status LED |
 | `servo_module` | LEDC PWM servo control |
 | `mpu6050_module` | IMU sensor (accel, gyro, temperature) |
 | `vl6180x_module` | Time-of-Flight distance sensor |
+| `led_module` | 3× GPIO LED outputs (GPIO7/8/3) |
+| `motor_module` | DC motor dual-PWM control (LEDC CH3/CH4) |
 | `reset_button_module` | Factory reset via 3-second BOOT button hold |
 
 ---
@@ -218,6 +235,144 @@ curl -X POST http://<device_ip>:8080/api/v1/buzzer \
 
 ---
 
+#### `GET /api/v1/relay/{n}` — Get Relay State
+
+**Auth required.** `n` = 1 or 2.
+
+```sh
+curl http://<device_ip>:8080/api/v1/relay/1 \
+  -H 'Authorization: Bearer iot-kit-dev'
+```
+
+```json
+{ "ok": true, "data": { "relay": 1, "state": "off" } }
+```
+
+---
+
+#### `POST /api/v1/relay/{n}` — Set Relay State
+
+**Auth required.** `n` = 1 or 2.
+
+```sh
+curl -X POST http://<device_ip>:8080/api/v1/relay/1 \
+  -H 'Authorization: Bearer iot-kit-dev' \
+  -H 'Content-Type: application/json' \
+  -d '{"state":"on"}'
+```
+
+```json
+{ "ok": true, "data": { "relay": 1, "state": "on" } }
+```
+
+`state` must be `"on"` or `"off"`.
+
+---
+
+#### `GET /api/v1/sensors/magnetic` — Magnetic Switch (GPIO40)
+
+**Auth required.**
+
+```sh
+curl http://<device_ip>:8080/api/v1/sensors/magnetic \
+  -H 'Authorization: Bearer iot-kit-dev'
+```
+
+```json
+{ "ok": true, "data": { "closed": true } }
+```
+
+`closed: true` = magnet detected, `false` = open.
+
+---
+
+#### `GET /api/v1/sensors/button` — User Button (GPIO41)
+
+**Auth required.**
+
+```sh
+curl http://<device_ip>:8080/api/v1/sensors/button \
+  -H 'Authorization: Bearer iot-kit-dev'
+```
+
+```json
+{ "ok": true, "data": { "pressed": true } }
+```
+
+---
+
+#### `GET /api/v1/sensors/ldr` — Light Level (LDR)
+
+Reads light intensity from the LDR on GPIO9 (ADC1 CH8).
+
+**Auth required.**
+
+```sh
+curl http://<device_ip>:8080/api/v1/sensors/ldr \
+  -H 'Authorization: Bearer iot-kit-dev'
+```
+
+```json
+{
+  "ok": true,
+  "data": { "raw": 2560, "percent": 62 }
+}
+```
+
+| Field | Description |
+|---|---|
+| `raw` | 12-bit ADC value (0–4095) |
+| `percent` | Light level 0–100 % (0 = dark, 100 = bright) |
+
+---
+
+#### `GET /api/v1/sensors/water` — Water Level
+
+Reads water level from the analog sensor on GPIO10 (ADC1 CH9).
+
+**Auth required.**
+
+```sh
+curl http://<device_ip>:8080/api/v1/sensors/water \
+  -H 'Authorization: Bearer iot-kit-dev'
+```
+
+```json
+{
+  "ok": true,
+  "data": { "raw": 1024, "percent": 25 }
+}
+```
+
+| Field | Description |
+|---|---|
+| `raw` | 12-bit ADC value (0–4095) |
+| `percent` | Water level 0–100 % (0 = dry, 100 = full) |
+
+---
+
+#### `GET /api/v1/sensors/dht` — Temperature & Humidity (DHT22)
+
+Reads temperature and humidity from the DHT22 on GPIO4.
+
+**Auth required.**
+
+```sh
+curl http://<device_ip>:8080/api/v1/sensors/dht \
+  -H 'Authorization: Bearer iot-kit-dev'
+```
+
+```json
+{
+  "ok": true,
+  "data": { "temperature": 25.000000, "humidity": 60.000000 }
+}
+```
+
+Units: temperature in **°C**, humidity in **%RH**.
+
+---
+
 #### `GET /api/v1/sensors/imu` — IMU (MPU6050)
 
 Reads accelerometer, gyroscope, and die temperature on demand.
@@ -297,6 +452,93 @@ curl -X POST http://<device_ip>:8080/api/v1/servo \
 ```
 
 `angle` must be 0–180 degrees.
+
+---
+
+#### `GET /api/v1/led/{n}` — Get LED State
+
+**Auth required.** `n` = 1 (GPIO7), 2 (GPIO8), or 3 (GPIO3).
+
+```sh
+curl http://<device_ip>:8080/api/v1/led/1 \
+  -H 'Authorization: Bearer iot-kit-dev'
+```
+
+```json
+{ "ok": true, "data": { "led": 1, "state": "off" } }
+```
+
+---
+
+#### `POST /api/v1/led/{n}` — Set LED State
+
+**Auth required.** `n` = 1, 2, or 3.
+
+```sh
+curl -X POST http://<device_ip>:8080/api/v1/led/1 \
+  -H 'Authorization: Bearer iot-kit-dev' \
+  -H 'Content-Type: application/json' \
+  -d '{"state":"on"}'
+```
+
+```json
+{ "ok": true, "data": { "led": 1, "state": "on" } }
+```
+
+`state` must be `"on"` or `"off"`.
+
+---
+
+#### `GET /api/v1/motor` — Get Motor State
+
+**Auth required.**
+
+```sh
+curl http://<device_ip>:8080/api/v1/motor \
+  -H 'Authorization: Bearer iot-kit-dev'
+```
+
+```json
+{ "ok": true, "data": { "speed": 75, "direction": "forward" } }
+```
+
+---
+
+#### `POST /api/v1/motor` — Set Motor Speed & Direction
+
+**Auth required.**
+
+| Field | Required | Notes |
+|---|---|---|
+| `speed` | Yes | 0–100 % (0 = coast) |
+| `direction` | No | `forward` (default) or `backward` |
+
+**Run forward at 60 %:**
+```sh
+curl -X POST http://<device_ip>:8080/api/v1/motor \
+  -H 'Authorization: Bearer iot-kit-dev' \
+  -H 'Content-Type: application/json' \
+  -d '{"speed":60,"direction":"forward"}'
+```
+
+```json
+{ "ok": true, "data": { "speed": 60, "direction": "forward" } }
+```
+
+**Coast (stop):**
+```sh
+curl -X POST http://<device_ip>:8080/api/v1/motor \
+  -H 'Authorization: Bearer iot-kit-dev' \
+  -H 'Content-Type: application/json' \
+  -d '{"speed":0}'
+```
+
+```json
+{ "ok": true, "data": { "speed": 0, "direction": "coast" } }
+```
+
+H-bridge wiring: IN1=GPIO15 (LEDC CH3), IN2=GPIO16 (LEDC CH4). Both are 20 kHz PWM.  
+Forward: IN1=duty, IN2=0. Backward: IN1=0, IN2=duty. Coast: both 0.
 
 ---
 

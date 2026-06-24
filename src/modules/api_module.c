@@ -13,7 +13,13 @@
 #include "modules/buzzer_module.h"
 #include "modules/config_module.h"
 #include "modules/device_identity.h"
+#include "modules/analog_module.h"
+#include "modules/gpio_inputs_module.h"
+#include "modules/relay_module.h"
+#include "modules/dht22_module.h"
 #include "modules/mpu6050_module.h"
+#include "modules/led_module.h"
+#include "modules/motor_module.h"
 #include "modules/provision_module.h"
 #include "modules/servo_module.h"
 #include "modules/vl6180x_module.h"
@@ -690,6 +696,186 @@ static int handle_imu_get(int fd, const char *request)
 	return send_response(fd, 200, "OK", "application/json", body);
 }
 
+static int handle_relay_get(int fd, const char *request, int relay)
+{
+	bool on;
+	char body[64];
+	int ret;
+
+	if (!auth_header_valid(request)) {
+		return send_response(fd, 401, "Unauthorized", "application/json",
+				     "{\"ok\":false,\"error\":\"invalid bearer token\"}");
+	}
+
+	ret = relay_module_get(relay, &on);
+	if (ret < 0) {
+		return send_response(fd, 503, "Service Unavailable", "application/json",
+				     "{\"ok\":false,\"error\":\"relay not available\"}");
+	}
+
+	snprintk(body, sizeof(body),
+		 "{\"ok\":true,\"data\":{\"relay\":%d,\"state\":\"%s\"}}",
+		 relay, on ? "on" : "off");
+
+	return send_response(fd, 200, "OK", "application/json", body);
+}
+
+static int handle_relay_post(int fd, const char *request, const char *body, int relay)
+{
+	char state[8] = "";
+	int ret;
+
+	if (!auth_header_valid(request)) {
+		return send_response(fd, 401, "Unauthorized", "application/json",
+				     "{\"ok\":false,\"error\":\"invalid bearer token\"}");
+	}
+
+	if (!json_get_string(body, "state", state, sizeof(state))) {
+		return send_response(fd, 400, "Bad Request", "application/json",
+				     "{\"ok\":false,\"error\":\"missing state\"}");
+	}
+
+	if (strcmp(state, "on") != 0 && strcmp(state, "off") != 0) {
+		return send_response(fd, 400, "Bad Request", "application/json",
+				     "{\"ok\":false,\"error\":\"state must be on or off\"}");
+	}
+
+	ret = relay_module_set(relay, strcmp(state, "on") == 0);
+	if (ret < 0) {
+		return send_response(fd, 500, "Internal Server Error", "application/json",
+				     "{\"ok\":false,\"error\":\"relay set failed\"}");
+	}
+
+	char resp[64];
+
+	snprintk(resp, sizeof(resp),
+		 "{\"ok\":true,\"data\":{\"relay\":%d,\"state\":\"%s\"}}", relay, state);
+
+	return send_response(fd, 200, "OK", "application/json", resp);
+}
+
+static int handle_magnetic_get(int fd, const char *request)
+{
+	bool closed;
+	char body[64];
+	int ret;
+
+	if (!auth_header_valid(request)) {
+		return send_response(fd, 401, "Unauthorized", "application/json",
+				     "{\"ok\":false,\"error\":\"invalid bearer token\"}");
+	}
+
+	ret = gpio_inputs_module_read_magnetic(&closed);
+	if (ret < 0) {
+		return send_response(fd, 503, "Service Unavailable", "application/json",
+				     "{\"ok\":false,\"error\":\"magnetic switch not available\"}");
+	}
+
+	snprintk(body, sizeof(body),
+		 "{\"ok\":true,\"data\":{\"closed\":%s}}", closed ? "true" : "false");
+
+	return send_response(fd, 200, "OK", "application/json", body);
+}
+
+static int handle_button_get(int fd, const char *request)
+{
+	bool pressed;
+	char body[64];
+	int ret;
+
+	if (!auth_header_valid(request)) {
+		return send_response(fd, 401, "Unauthorized", "application/json",
+				     "{\"ok\":false,\"error\":\"invalid bearer token\"}");
+	}
+
+	ret = gpio_inputs_module_read_button(&pressed);
+	if (ret < 0) {
+		return send_response(fd, 503, "Service Unavailable", "application/json",
+				     "{\"ok\":false,\"error\":\"button not available\"}");
+	}
+
+	snprintk(body, sizeof(body),
+		 "{\"ok\":true,\"data\":{\"pressed\":%s}}", pressed ? "true" : "false");
+
+	return send_response(fd, 200, "OK", "application/json", body);
+}
+
+static int handle_ldr_get(int fd, const char *request)
+{
+	struct analog_reading r;
+	char body[64];
+	int ret;
+
+	if (!auth_header_valid(request)) {
+		return send_response(fd, 401, "Unauthorized", "application/json",
+				     "{\"ok\":false,\"error\":\"invalid bearer token\"}");
+	}
+
+	ret = analog_module_read_ldr(&r);
+	if (ret < 0) {
+		return send_response(fd, 503, "Service Unavailable", "application/json",
+				     "{\"ok\":false,\"error\":\"LDR not available\"}");
+	}
+
+	snprintk(body, sizeof(body),
+		 "{\"ok\":true,\"data\":{\"raw\":%d,\"percent\":%d}}",
+		 (int)r.raw, (int)r.percent);
+
+	return send_response(fd, 200, "OK", "application/json", body);
+}
+
+static int handle_water_get(int fd, const char *request)
+{
+	struct analog_reading r;
+	char body[64];
+	int ret;
+
+	if (!auth_header_valid(request)) {
+		return send_response(fd, 401, "Unauthorized", "application/json",
+				     "{\"ok\":false,\"error\":\"invalid bearer token\"}");
+	}
+
+	ret = analog_module_read_water(&r);
+	if (ret < 0) {
+		return send_response(fd, 503, "Service Unavailable", "application/json",
+				     "{\"ok\":false,\"error\":\"water level sensor not available\"}");
+	}
+
+	snprintk(body, sizeof(body),
+		 "{\"ok\":true,\"data\":{\"raw\":%d,\"percent\":%d}}",
+		 (int)r.raw, (int)r.percent);
+
+	return send_response(fd, 200, "OK", "application/json", body);
+}
+
+static int handle_dht_get(int fd, const char *request)
+{
+	struct dht22_reading r;
+	char body[128];
+	int ret;
+
+	if (!auth_header_valid(request)) {
+		return send_response(fd, 401, "Unauthorized", "application/json",
+				     "{\"ok\":false,\"error\":\"invalid bearer token\"}");
+	}
+
+	ret = dht22_module_read(&r);
+	if (ret < 0) {
+		return send_response(fd, 503, "Service Unavailable", "application/json",
+				     "{\"ok\":false,\"error\":\"DHT22 not available\"}");
+	}
+
+	snprintk(body, sizeof(body),
+		 "{\"ok\":true,\"data\":{"
+		 "\"temperature\":%s%d.%06d,"
+		 "\"humidity\":%d.%06d"
+		 "}}",
+		 SV_SIGN(r.temp_1, r.temp_2), SV_ABS(r.temp_1), SV_ABS(r.temp_2),
+		 r.humid_1, r.humid_2);
+
+	return send_response(fd, 200, "OK", "application/json", body);
+}
+
 static int handle_tof_get(int fd, const char *request)
 {
 	char body[64];
@@ -757,6 +943,146 @@ static int handle_servo_post(int fd, const char *request, const char *body)
 
 	snprintk(resp, sizeof(resp),
 		 "{\"ok\":true,\"data\":{\"angle\":%d}}", angle);
+
+	return send_response(fd, 200, "OK", "application/json", resp);
+}
+
+static int handle_led_get(int fd, const char *request, int led)
+{
+	bool on;
+	char body[64];
+	int ret;
+
+	if (!auth_header_valid(request)) {
+		return send_response(fd, 401, "Unauthorized", "application/json",
+				     "{\"ok\":false,\"error\":\"invalid bearer token\"}");
+	}
+
+	ret = led_module_get(led, &on);
+	if (ret < 0) {
+		return send_response(fd, 503, "Service Unavailable", "application/json",
+				     "{\"ok\":false,\"error\":\"LED not available\"}");
+	}
+
+	snprintk(body, sizeof(body),
+		 "{\"ok\":true,\"data\":{\"led\":%d,\"state\":\"%s\"}}",
+		 led, on ? "on" : "off");
+
+	return send_response(fd, 200, "OK", "application/json", body);
+}
+
+static int handle_led_post(int fd, const char *request, const char *body, int led)
+{
+	char state[8] = "";
+	int ret;
+
+	if (!auth_header_valid(request)) {
+		return send_response(fd, 401, "Unauthorized", "application/json",
+				     "{\"ok\":false,\"error\":\"invalid bearer token\"}");
+	}
+
+	if (!json_get_string(body, "state", state, sizeof(state))) {
+		return send_response(fd, 400, "Bad Request", "application/json",
+				     "{\"ok\":false,\"error\":\"missing state\"}");
+	}
+
+	if (strcmp(state, "on") != 0 && strcmp(state, "off") != 0) {
+		return send_response(fd, 400, "Bad Request", "application/json",
+				     "{\"ok\":false,\"error\":\"state must be on or off\"}");
+	}
+
+	ret = led_module_set(led, strcmp(state, "on") == 0);
+	if (ret < 0) {
+		return send_response(fd, 500, "Internal Server Error", "application/json",
+				     "{\"ok\":false,\"error\":\"LED set failed\"}");
+	}
+
+	char resp[64];
+
+	snprintk(resp, sizeof(resp),
+		 "{\"ok\":true,\"data\":{\"led\":%d,\"state\":\"%s\"}}", led, state);
+
+	return send_response(fd, 200, "OK", "application/json", resp);
+}
+
+static int handle_motor_get(int fd, const char *request)
+{
+	struct motor_state s;
+	char body[96];
+
+	if (!auth_header_valid(request)) {
+		return send_response(fd, 401, "Unauthorized", "application/json",
+				     "{\"ok\":false,\"error\":\"invalid bearer token\"}");
+	}
+
+	motor_module_get(&s);
+
+	snprintk(body, sizeof(body),
+		 "{\"ok\":true,\"data\":{"
+		 "\"speed\":%d,"
+		 "\"direction\":\"%s\""
+		 "}}",
+		 (int)s.speed_percent,
+		 s.direction == MOTOR_DIR_FORWARD ? "forward" : "backward");
+
+	return send_response(fd, 200, "OK", "application/json", body);
+}
+
+static int handle_motor_post(int fd, const char *request, const char *body)
+{
+	char direction_str[16] = "";
+	int speed = 0;
+	int ret;
+
+	if (!auth_header_valid(request)) {
+		return send_response(fd, 401, "Unauthorized", "application/json",
+				     "{\"ok\":false,\"error\":\"invalid bearer token\"}");
+	}
+
+	if (!json_get_int(body, "speed", &speed)) {
+		return send_response(fd, 400, "Bad Request", "application/json",
+				     "{\"ok\":false,\"error\":\"missing speed\"}");
+	}
+
+	if (speed < 0 || speed > 100) {
+		return send_response(fd, 400, "Bad Request", "application/json",
+				     "{\"ok\":false,\"error\":\"speed must be 0-100\"}");
+	}
+
+	if (speed == 0) {
+		ret = motor_module_stop();
+		if (ret < 0) {
+			return send_response(fd, 500, "Internal Server Error", "application/json",
+					     "{\"ok\":false,\"error\":\"motor stop failed\"}");
+		}
+		return send_response(fd, 200, "OK", "application/json",
+				     "{\"ok\":true,\"data\":{\"speed\":0,\"direction\":\"coast\"}}");
+	}
+
+	(void)json_get_string(body, "direction", direction_str, sizeof(direction_str));
+
+	motor_dir_t dir;
+
+	if (strcmp(direction_str, "backward") == 0) {
+		dir = MOTOR_DIR_BACKWARD;
+	} else if (direction_str[0] == '\0' || strcmp(direction_str, "forward") == 0) {
+		dir = MOTOR_DIR_FORWARD;
+	} else {
+		return send_response(fd, 400, "Bad Request", "application/json",
+				     "{\"ok\":false,\"error\":\"direction must be forward or backward\"}");
+	}
+
+	ret = motor_module_set((int32_t)speed, dir);
+	if (ret < 0) {
+		return send_response(fd, 500, "Internal Server Error", "application/json",
+				     "{\"ok\":false,\"error\":\"motor set failed\"}");
+	}
+
+	char resp[96];
+
+	snprintk(resp, sizeof(resp),
+		 "{\"ok\":true,\"data\":{\"speed\":%d,\"direction\":\"%s\"}}",
+		 speed, dir == MOTOR_DIR_FORWARD ? "forward" : "backward");
 
 	return send_response(fd, 200, "OK", "application/json", resp);
 }
@@ -867,6 +1193,51 @@ static void handle_client(int client_fd)
 
 		LOG_INF("HTTP %s %s complete ret=%d", method, path, ret);
 	} else if (strcmp(method, "GET") == 0 &&
+		   (strcmp(path, "/api/v1/relay/1") == 0)) {
+		int ret = handle_relay_get(client_fd, raw_request, 1);
+
+		LOG_INF("HTTP %s %s complete ret=%d", method, path, ret);
+	} else if (strcmp(method, "POST") == 0 &&
+		   (strcmp(path, "/api/v1/relay/1") == 0)) {
+		int ret = handle_relay_post(client_fd, raw_request, body, 1);
+
+		LOG_INF("HTTP %s %s complete ret=%d", method, path, ret);
+	} else if (strcmp(method, "GET") == 0 &&
+		   (strcmp(path, "/api/v1/relay/2") == 0)) {
+		int ret = handle_relay_get(client_fd, raw_request, 2);
+
+		LOG_INF("HTTP %s %s complete ret=%d", method, path, ret);
+	} else if (strcmp(method, "POST") == 0 &&
+		   (strcmp(path, "/api/v1/relay/2") == 0)) {
+		int ret = handle_relay_post(client_fd, raw_request, body, 2);
+
+		LOG_INF("HTTP %s %s complete ret=%d", method, path, ret);
+	} else if (strcmp(method, "GET") == 0 &&
+		   strcmp(path, "/api/v1/sensors/magnetic") == 0) {
+		int ret = handle_magnetic_get(client_fd, raw_request);
+
+		LOG_INF("HTTP %s %s complete ret=%d", method, path, ret);
+	} else if (strcmp(method, "GET") == 0 &&
+		   strcmp(path, "/api/v1/sensors/button") == 0) {
+		int ret = handle_button_get(client_fd, raw_request);
+
+		LOG_INF("HTTP %s %s complete ret=%d", method, path, ret);
+	} else if (strcmp(method, "GET") == 0 &&
+		   strcmp(path, "/api/v1/sensors/ldr") == 0) {
+		int ret = handle_ldr_get(client_fd, raw_request);
+
+		LOG_INF("HTTP %s %s complete ret=%d", method, path, ret);
+	} else if (strcmp(method, "GET") == 0 &&
+		   strcmp(path, "/api/v1/sensors/water") == 0) {
+		int ret = handle_water_get(client_fd, raw_request);
+
+		LOG_INF("HTTP %s %s complete ret=%d", method, path, ret);
+	} else if (strcmp(method, "GET") == 0 &&
+		   strcmp(path, "/api/v1/sensors/dht") == 0) {
+		int ret = handle_dht_get(client_fd, raw_request);
+
+		LOG_INF("HTTP %s %s complete ret=%d", method, path, ret);
+	} else if (strcmp(method, "GET") == 0 &&
 		   strcmp(path, "/api/v1/sensors/tof") == 0) {
 		int ret = handle_tof_get(client_fd, raw_request);
 
@@ -879,6 +1250,46 @@ static void handle_client(int client_fd)
 	} else if (strcmp(method, "POST") == 0 &&
 		   strcmp(path, "/api/v1/servo") == 0) {
 		int ret = handle_servo_post(client_fd, raw_request, body);
+
+		LOG_INF("HTTP %s %s complete ret=%d", method, path, ret);
+	} else if (strcmp(method, "GET") == 0 &&
+		   strcmp(path, "/api/v1/led/1") == 0) {
+		int ret = handle_led_get(client_fd, raw_request, 1);
+
+		LOG_INF("HTTP %s %s complete ret=%d", method, path, ret);
+	} else if (strcmp(method, "POST") == 0 &&
+		   strcmp(path, "/api/v1/led/1") == 0) {
+		int ret = handle_led_post(client_fd, raw_request, body, 1);
+
+		LOG_INF("HTTP %s %s complete ret=%d", method, path, ret);
+	} else if (strcmp(method, "GET") == 0 &&
+		   strcmp(path, "/api/v1/led/2") == 0) {
+		int ret = handle_led_get(client_fd, raw_request, 2);
+
+		LOG_INF("HTTP %s %s complete ret=%d", method, path, ret);
+	} else if (strcmp(method, "POST") == 0 &&
+		   strcmp(path, "/api/v1/led/2") == 0) {
+		int ret = handle_led_post(client_fd, raw_request, body, 2);
+
+		LOG_INF("HTTP %s %s complete ret=%d", method, path, ret);
+	} else if (strcmp(method, "GET") == 0 &&
+		   strcmp(path, "/api/v1/led/3") == 0) {
+		int ret = handle_led_get(client_fd, raw_request, 3);
+
+		LOG_INF("HTTP %s %s complete ret=%d", method, path, ret);
+	} else if (strcmp(method, "POST") == 0 &&
+		   strcmp(path, "/api/v1/led/3") == 0) {
+		int ret = handle_led_post(client_fd, raw_request, body, 3);
+
+		LOG_INF("HTTP %s %s complete ret=%d", method, path, ret);
+	} else if (strcmp(method, "GET") == 0 &&
+		   strcmp(path, "/api/v1/motor") == 0) {
+		int ret = handle_motor_get(client_fd, raw_request);
+
+		LOG_INF("HTTP %s %s complete ret=%d", method, path, ret);
+	} else if (strcmp(method, "POST") == 0 &&
+		   strcmp(path, "/api/v1/motor") == 0) {
+		int ret = handle_motor_post(client_fd, raw_request, body);
 
 		LOG_INF("HTTP %s %s complete ret=%d", method, path, ret);
 	} else {

@@ -16,6 +16,12 @@ target_sources(app PRIVATE
 	src/modules/vl6180x_module.c
 	src/modules/servo_module.c
 	src/modules/wifi_manager.c
+	src/modules/relay_module.c
+	src/modules/analog_module.c
+	src/modules/gpio_inputs_module.c
+	src/modules/dht22_module.c
+	src/modules/led_module.c
+	src/modules/motor_module.c
 )
 
 target_include_directories(app PRIVATE include)

@@ -3,6 +3,9 @@ from pages.provision import ProvisionPage
 from pages.sensors import SensorsPage
 from pages.servo import ServoPage
 from pages.buzzer import BuzzerPage
+from pages.relay import RelayPage
+from pages.led import LedPage
+from pages.motor import MotorPage
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -36,6 +39,9 @@ class App(ctk.CTk):
             ("📊  Sensors",    "sensors"),
             ("⚙️  Servo",      "servo"),
             ("🔔  Buzzer",     "buzzer"),
+            ("🔌  Relay",      "relay"),
+            ("💡  LED",        "led"),
+            ("⚡  Motor",      "motor"),
         ]
         self.nav_buttons = {}
         for label, name in nav_items:
@@ -61,12 +67,18 @@ class App(ctk.CTk):
             "sensors":   SensorsPage(self.content, self),
             "servo":     ServoPage(self.content, self),
             "buzzer":    BuzzerPage(self.content, self),
+            "relay":     RelayPage(self.content, self),
+            "led":       LedPage(self.content, self),
+            "motor":     MotorPage(self.content, self),
         }
 
         self.show_page("provision")
 
     def show_page(self, name):
-        for page in self.pages.values():
+        for n, page in self.pages.items():
+            if n != name and page.winfo_ismapped():
+                if hasattr(page, "on_hide"):
+                    page.on_hide()
             page.pack_forget()
         self.pages[name].pack(fill="both", expand=True)
 

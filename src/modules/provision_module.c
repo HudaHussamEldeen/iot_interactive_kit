@@ -104,8 +104,8 @@ static void configure_softap_from_identity(void)
 
 	snprintk(ap_cfg.ssid, sizeof(ap_cfg.ssid), "%s", id->softap_ssid);
 	snprintk(ap_cfg.psk, sizeof(ap_cfg.psk), "%s", id->softap_psk);
-	ap_cfg.channel = 1;
-	ap_cfg.open = false;
+	ap_cfg.channel = 6;
+	ap_cfg.open = true; /* open for scan test */
 }
 
 static int enter_provisioning_mode(void)
