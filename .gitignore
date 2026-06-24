@@ -1,0 +1,6 @@
+build/
+iot_interactive_kit/build/
+**/__pycache__/
+*.pyc
+*.pyo
+.DS_Store
